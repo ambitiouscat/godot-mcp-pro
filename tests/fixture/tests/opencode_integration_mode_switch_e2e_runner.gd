@@ -178,6 +178,15 @@ func _switch_native_to_mcp() -> void:
 	_expect(mcp_trigger.get("ok", false), "authenticated MCP status request triggers the lazy child: %s" % mcp_trigger.get("error", ""))
 	if not mcp_trigger.get("ok", false):
 		return
+	var trigger_status := _mcp_status_entry(mcp_trigger)
+	print("OPENCODE_GODOT_MODE_SWITCH_MCP_TRIGGER_STATUS %s" % JSON.stringify(_redacted_status_diagnostic(trigger_status)))
+	_expect(not trigger_status.is_empty(), "authenticated MCP status includes the configured Godot child")
+	if trigger_status.is_empty():
+		return
+	_expect(trigger_status.get("status") != "failed", "MCP child startup does not fail: %s" % _redacted_status_diagnostic(trigger_status).get("error", ""))
+	_expect(trigger_status.get("status") != "disabled", "MCP child is enabled in the second generation")
+	if not failures.is_empty():
+		return
 	mcp_ownership_path = _ownership_path()
 	var ownership: Variant = await _wait_for_mcp_ownership()
 	_expect(ownership is Dictionary, "MCP generation publishes a complete nonce-bound ownership record before mcp_ready")
@@ -405,14 +414,30 @@ func _is_complete_current_mcp_ownership(record: Dictionary) -> bool:
 
 
 func _mcp_status_is_connected(response: Dictionary) -> bool:
+	return _mcp_status_entry(response).get("status") == "connected"
+
+
+func _mcp_status_entry(response: Dictionary) -> Dictionary:
 	if int(response.get("code", 0)) != 200:
-		return false
+		return {}
 	var parser := JSON.new()
 	if parser.parse(str(response.get("body", ""))) != OK or not parser.data is Dictionary:
-		return false
+		return {}
 	var statuses: Dictionary = parser.data
 	var godot: Variant = statuses.get("godot")
-	return godot is Dictionary and (godot as Dictionary).get("status") == "connected"
+	return (godot as Dictionary).duplicate(true) if godot is Dictionary else {}
+
+
+func _redacted_status_diagnostic(status: Dictionary) -> Dictionary:
+	var diagnostic := {"status": str(status.get("status", "missing"))}
+	if status.has("error"):
+		var message := str(status.get("error", ""))
+		for secret_value in [lifecycle.password, lifecycle.launch_nonce, bridge.owner_nonce]:
+			var secret := str(secret_value)
+			if not secret.is_empty():
+				message = message.replace(secret, "[REDACTED]")
+		diagnostic["error"] = message.right(1024)
+	return diagnostic
 
 
 func _wait_process_stale(pid: int, started_at_ms: int, message: String) -> void:
