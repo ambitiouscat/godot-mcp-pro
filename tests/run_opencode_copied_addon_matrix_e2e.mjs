@@ -264,12 +264,15 @@ async function stop(child) {
 function childFinished(child) { return child.exitCode !== null || child.signalCode !== null }
 function waitForClose(child) { return childFinished(child) ? Promise.resolve(child.exitCode) : new Promise((resolve) => child.once("close", (code) => resolve(code))) }
 function canonicalTemporaryDirectory() {
-  const temporary = fs.realpathSync(os.tmpdir())
+  // Node's compatibility realpath preserves Windows DOS 8.3 spellings such
+  // as C:\Users\RUNNER~1. The native implementation expands those aliases,
+  // in addition to resolving macOS /var -> /private/var.
+  const temporary = fs.realpathSync.native(os.tmpdir())
   if (!fs.statSync(temporary).isDirectory() || !path.isAbsolute(temporary)) fail(`temporary directory is not a canonical absolute directory: ${temporary}`)
   return temporary
 }
 function safeRemoveFixture(fixture) {
-  const parent = canonicalTemporaryDirectory(); const target = fs.realpathSync(fixture)
+  const parent = canonicalTemporaryDirectory(); const target = fs.realpathSync.native(fixture)
   if (path.dirname(target) !== parent || !path.basename(target).startsWith(FIXTURE_PREFIX)) fail(`refusing unsafe fixture cleanup: ${target}`)
   fs.rmSync(target, { recursive: true, force: true, maxRetries: 3 })
 }
@@ -381,7 +384,7 @@ async function run(options) {
 
 function selfTest() {
   if (!TUPLES.has("linux-glibc-arm64") || tuplePlatform("macos-arm64") !== "macos") throw new Error("tuple self-test failed")
-  if (fs.realpathSync(canonicalTemporaryDirectory()) !== canonicalTemporaryDirectory()) throw new Error("temporary-directory canonicalization self-test failed")
+  if (fs.realpathSync.native(os.tmpdir()) !== canonicalTemporaryDirectory()) throw new Error("temporary-directory canonicalization self-test failed")
   if (!godotArchitectureMatches("windows-x64", "x86_64") || !godotArchitectureMatches("linux-glibc-arm64", "aarch64") || godotArchitectureMatches("windows-x64", "") || godotArchitectureMatches("macos-arm64", "x86_64")) throw new Error("architecture gate self-test failed")
   if (!parseArgs(["--tuple", "windows-x64", "--report", "report.json"]).report) throw new Error("CLI report parser self-test failed")
   try { parseArgs(["--reprot", "report.json"]); throw new Error("unknown CLI option was accepted") } catch (error) { if (!String(error.message).includes("unknown option")) throw error }
