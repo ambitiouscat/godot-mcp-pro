@@ -174,12 +174,9 @@ func _switch_native_to_mcp() -> void:
 	if lifecycle.state != "ready":
 		return
 	_expect(lifecycle.get_integration_mode() == "mcp", "second generation is MCP")
-	var mcp_status := await _wait_for_mcp_connected_status()
-	_expect(mcp_status.get("request_ok", false), "authenticated MCP status request succeeds: %s" % mcp_status.get("error", ""))
-	if not mcp_status.get("request_ok", false):
-		return
-	_expect(mcp_status.get("connected", false), "authenticated MCP status reports the Godot child connected")
-	if not failures.is_empty():
+	var mcp_trigger := await _http_json(HTTPClient.METHOD_GET, "/mcp")
+	_expect(mcp_trigger.get("ok", false), "authenticated MCP status request triggers the lazy child: %s" % mcp_trigger.get("error", ""))
+	if not mcp_trigger.get("ok", false):
 		return
 	mcp_ownership_path = _ownership_path()
 	var ownership: Variant = await _wait_for_mcp_ownership()
@@ -199,6 +196,13 @@ func _switch_native_to_mcp() -> void:
 	_expect(ProcessIdentity.inspect(mcp_sidecar_pid, mcp_sidecar_started_at_ms).get("matches", false), "MCP ownership sidecar identity is currently live")
 	_expect(_same_path(mcp_sidecar_executable, str(lifecycle._payload.get("mcp_path", ""))), "MCP ownership executable is the fixture MCP payload")
 	_expect(await _wait_for_bridge_ready(), "MCP bridge reaches READY after nonce-bound ownership publication")
+	if not failures.is_empty():
+		return
+	var mcp_status := await _wait_for_mcp_connected_status()
+	_expect(mcp_status.get("request_ok", false), "authenticated MCP status request succeeds after bridge READY: %s" % mcp_status.get("error", ""))
+	if not mcp_status.get("request_ok", false):
+		return
+	_expect(mcp_status.get("connected", false), "authenticated MCP status reports the Godot child connected")
 	if not failures.is_empty():
 		return
 	_publish_event("mcp_ready", {
@@ -348,7 +352,7 @@ func _wait_command() -> bool:
 
 
 func _wait_for_mcp_ownership() -> Variant:
-	while Time.get_ticks_msec() < _deadline(5_000):
+	while Time.get_ticks_msec() < _deadline(15_000):
 		lifecycle.update()
 		_tick_bridge_client()
 		if lifecycle.state == "error":
@@ -360,15 +364,14 @@ func _wait_for_mcp_ownership() -> Variant:
 			if _is_complete_current_mcp_ownership(data):
 				return data
 		await process_frame
-	_expect(false, "MCP ownership record did not become complete for the current nonce within 5 seconds")
+	_expect(false, "MCP ownership record did not become complete for the current nonce within 15 seconds")
 	return null
 
 
 func _wait_for_mcp_connected_status() -> Dictionary:
-	# The first authenticated /mcp request creates OpenCode's MCP InstanceState.
-	# Native Windows runners may return the initial disconnected snapshot before
-	# the child transport has finished starting, so require eventual connected
-	# state rather than treating that valid intermediate response as terminal.
+	# The trigger request creates OpenCode's MCP InstanceState. The sidecar then
+	# publishes ownership and waits for the Godot bridge before its stdio MCP
+	# transport can become connected, so this poll runs only after bridge READY.
 	while Time.get_ticks_msec() < _deadline(READY_TIMEOUT_MS):
 		lifecycle.update()
 		_tick_bridge_client()
