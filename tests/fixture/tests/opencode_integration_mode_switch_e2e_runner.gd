@@ -266,7 +266,7 @@ func _wait_ready() -> bool:
 			_expect(false, "lifecycle error: %s" % lifecycle.detail)
 			return false
 		await process_frame
-	print("OPENCODE_GODOT_MODE_SWITCH_NATIVE_READY_TIMEOUT state=%s detail=%s pid=%d runtime=%s listen=%s ownership=%s output_bytes=%d" % [
+	print("OPENCODE_GODOT_MODE_SWITCH_NATIVE_READY_TIMEOUT state=%s detail=%s pid=%d runtime=%s listen=%s ownership=%s output_bytes=%d redaction_tail_bytes=%d" % [
 		lifecycle.state,
 		lifecycle.detail,
 		lifecycle.daemon_pid,
@@ -274,7 +274,11 @@ func _wait_ready() -> bool:
 		FileAccess.file_exists(lifecycle.runtime_dir.path_join("listen-%s.json" % lifecycle.launch_nonce)),
 		FileAccess.file_exists(lifecycle.runtime_dir.path_join("ownership.json")),
 		lifecycle._output_buffer.length(),
+		lifecycle._redaction_tail.length(),
 	])
+	# _output_buffer is already credential-redacted by the production lifecycle.
+	# Keep this bounded diagnostic separate so timeout failures remain actionable.
+	print("OPENCODE_GODOT_MODE_SWITCH_NATIVE_OUTPUT_TAIL %s" % JSON.stringify(lifecycle._output_buffer.right(2048)))
 	return false
 
 
