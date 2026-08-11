@@ -174,11 +174,11 @@ func _switch_native_to_mcp() -> void:
 	if lifecycle.state != "ready":
 		return
 	_expect(lifecycle.get_integration_mode() == "mcp", "second generation is MCP")
-	var mcp_status := await _http_json(HTTPClient.METHOD_GET, "/mcp")
-	_expect(mcp_status.get("ok", false), "authenticated MCP status request succeeds: %s" % mcp_status.get("error", ""))
-	if not mcp_status.get("ok", false):
+	var mcp_status := await _wait_for_mcp_connected_status()
+	_expect(mcp_status.get("request_ok", false), "authenticated MCP status request succeeds: %s" % mcp_status.get("error", ""))
+	if not mcp_status.get("request_ok", false):
 		return
-	_expect(_mcp_status_is_connected(mcp_status), "authenticated MCP status reports the Godot child connected")
+	_expect(mcp_status.get("connected", false), "authenticated MCP status reports the Godot child connected")
 	if not failures.is_empty():
 		return
 	mcp_ownership_path = _ownership_path()
@@ -362,6 +362,29 @@ func _wait_for_mcp_ownership() -> Variant:
 		await process_frame
 	_expect(false, "MCP ownership record did not become complete for the current nonce within 5 seconds")
 	return null
+
+
+func _wait_for_mcp_connected_status() -> Dictionary:
+	# The first authenticated /mcp request creates OpenCode's MCP InstanceState.
+	# Native Windows runners may return the initial disconnected snapshot before
+	# the child transport has finished starting, so require eventual connected
+	# state rather than treating that valid intermediate response as terminal.
+	while Time.get_ticks_msec() < _deadline(READY_TIMEOUT_MS):
+		lifecycle.update()
+		_tick_bridge_client()
+		if lifecycle.state == "error":
+			return {"request_ok": false, "connected": false, "error": "lifecycle entered error while polling MCP status"}
+		var response := await _http_json(HTTPClient.METHOD_GET, "/mcp")
+		if not response.get("ok", false):
+			return {"request_ok": false, "connected": false, "error": response.get("error", "MCP status request failed")}
+		if _mcp_status_is_connected(response):
+			return {"request_ok": true, "connected": true}
+		var retry_at := Time.get_ticks_msec() + 100
+		while Time.get_ticks_msec() < retry_at:
+			lifecycle.update()
+			_tick_bridge_client()
+			await process_frame
+	return {"request_ok": true, "connected": false, "error": "MCP status remained disconnected until the readiness deadline"}
 
 
 func _is_complete_current_mcp_ownership(record: Dictionary) -> bool:
