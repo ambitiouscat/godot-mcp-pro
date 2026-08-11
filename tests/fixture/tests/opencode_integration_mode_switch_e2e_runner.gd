@@ -276,10 +276,31 @@ func _wait_ready() -> bool:
 		lifecycle._output_buffer.length(),
 		lifecycle._redaction_tail.length(),
 	])
-	# _output_buffer is already credential-redacted by the production lifecycle.
-	# Keep this bounded diagnostic separate so timeout failures remain actionable.
-	print("OPENCODE_GODOT_MODE_SWITCH_NATIVE_OUTPUT_TAIL %s" % JSON.stringify(lifecycle._output_buffer.right(2048)))
+	print("OPENCODE_GODOT_MODE_SWITCH_NATIVE_OUTPUT_TAIL %s" % JSON.stringify(_redacted_daemon_output_snapshot()))
 	return false
+
+
+func _redacted_daemon_output_snapshot() -> String:
+	# Production withholds a tail so a credential split across pipe chunks cannot
+	# leak. For a bounded timeout snapshot, join both parts and mask full secrets
+	# plus any incomplete prefix/suffix that could sit at the snapshot boundary.
+	var combined: String = lifecycle._output_buffer + lifecycle._redaction_tail
+	for secret_value in [lifecycle.password, lifecycle.launch_nonce]:
+		var secret := str(secret_value)
+		if secret.is_empty():
+			continue
+		combined = combined.replace(secret, "[REDACTED]")
+		for fragment_length in range(secret.length() - 1, 0, -1):
+			var prefix := secret.left(fragment_length)
+			if combined.ends_with(prefix):
+				combined = combined.left(combined.length() - prefix.length()) + "[REDACTED_FRAGMENT]"
+				break
+		for fragment_length in range(secret.length() - 1, 0, -1):
+			var suffix := secret.right(fragment_length)
+			if combined.begins_with(suffix):
+				combined = "[REDACTED_FRAGMENT]" + combined.substr(suffix.length())
+				break
+	return combined.right(2048)
 
 
 func _wait_for_lifecycle_ready() -> bool:
