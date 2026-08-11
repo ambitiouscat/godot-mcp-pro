@@ -263,8 +263,13 @@ async function stop(child) {
 }
 function childFinished(child) { return child.exitCode !== null || child.signalCode !== null }
 function waitForClose(child) { return childFinished(child) ? Promise.resolve(child.exitCode) : new Promise((resolve) => child.once("close", (code) => resolve(code))) }
+function canonicalTemporaryDirectory() {
+  const temporary = fs.realpathSync(os.tmpdir())
+  if (!fs.statSync(temporary).isDirectory() || !path.isAbsolute(temporary)) fail(`temporary directory is not a canonical absolute directory: ${temporary}`)
+  return temporary
+}
 function safeRemoveFixture(fixture) {
-  const parent = path.resolve(os.tmpdir()); const target = path.resolve(fixture)
+  const parent = canonicalTemporaryDirectory(); const target = fs.realpathSync(fixture)
   if (path.dirname(target) !== parent || !path.basename(target).startsWith(FIXTURE_PREFIX)) fail(`refusing unsafe fixture cleanup: ${target}`)
   fs.rmSync(target, { recursive: true, force: true, maxRetries: 3 })
 }
@@ -303,7 +308,11 @@ async function run(options) {
   const versionMatch = version.match(/^4\.(\d+)/)
   if (!versionMatch || Number(versionMatch[1]) < 3) fail(`Godot must be 4.3 or newer, found: ${version}`)
   const sourceBefore = snapshotSource(addon, payload)
-  const fixture = path.join(os.tmpdir(), `${FIXTURE_PREFIX}${randomUUID()}`)
+  // macOS exposes its temporary directory through /var, which is a system
+  // symlink to /private/var. Managed mode intentionally rejects every
+  // symlink/junction parent, so create the isolated fixture under the real
+  // temporary-directory spelling instead of weakening the production gate.
+  const fixture = path.join(canonicalTemporaryDirectory(), `${FIXTURE_PREFIX}${randomUUID()}`)
   let provider; let godotChild; let sidecar
   try {
     fs.mkdirSync(fixture, { recursive: false }); copyFixture(fixture, addon)
@@ -372,6 +381,7 @@ async function run(options) {
 
 function selfTest() {
   if (!TUPLES.has("linux-glibc-arm64") || tuplePlatform("macos-arm64") !== "macos") throw new Error("tuple self-test failed")
+  if (fs.realpathSync(canonicalTemporaryDirectory()) !== canonicalTemporaryDirectory()) throw new Error("temporary-directory canonicalization self-test failed")
   if (!godotArchitectureMatches("windows-x64", "x86_64") || !godotArchitectureMatches("linux-glibc-arm64", "aarch64") || godotArchitectureMatches("windows-x64", "") || godotArchitectureMatches("macos-arm64", "x86_64")) throw new Error("architecture gate self-test failed")
   if (!parseArgs(["--tuple", "windows-x64", "--report", "report.json"]).report) throw new Error("CLI report parser self-test failed")
   try { parseArgs(["--reprot", "report.json"]); throw new Error("unknown CLI option was accepted") } catch (error) { if (!String(error.message).includes("unknown option")) throw error }
