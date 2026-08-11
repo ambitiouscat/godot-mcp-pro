@@ -35,6 +35,7 @@ var mcp_sidecar_started_at_ms := 0
 var mcp_sidecar_executable := ""
 var event_path := ""
 var continue_path := ""
+var mcp_ready_ack_path := ""
 var result_path := ""
 var deadline_ms := 0
 var command_completed := false
@@ -55,6 +56,7 @@ func _run() -> void:
 	deadline_ms = Time.get_ticks_msec() + TOTAL_TIMEOUT_MS
 	event_path = OS.get_environment("GODOT_MODE_SWITCH_EVENT_PATH")
 	continue_path = OS.get_environment("GODOT_MODE_SWITCH_CONTINUE_PATH")
+	mcp_ready_ack_path = OS.get_environment("GODOT_MODE_SWITCH_MCP_READY_ACK_PATH")
 	result_path = OS.get_environment("GODOT_MODE_SWITCH_RESULT_PATH")
 	var architecture := Engine.get_architecture_name().to_lower()
 	if OS.get_name() not in ["Windows", "macOS", "Linux"] or architecture not in ["x86_64", "arm64", "aarch64"]:
@@ -243,6 +245,13 @@ func _switch_native_to_mcp() -> void:
 		"sidecar_started_at_ms": mcp_sidecar_started_at_ms,
 		"sidecar_executable": mcp_sidecar_executable,
 	})
+	# Hold the verified child alive until an external matrix observer has checked
+	# the nonce-bound PID and executable. Without this second phase barrier a
+	# fast local provider can complete the tool call and final cleanup between
+	# the event-file write and the wrapper's next polling interval.
+	_expect(await _wait_for_continue_path(mcp_ready_ack_path), "wrapper observed the live MCP sidecar before tool invocation")
+	if not failures.is_empty():
+		return
 	await _invoke_packaged_tool_once("MCP")
 	mcp_tool_completed = failures.is_empty() and command_completed and command_result.get("method") == "get_project_info" and command_result.get("success") == true
 
@@ -626,9 +635,13 @@ func _publish_event(phase: String, extra: Dictionary) -> void:
 
 
 func _wait_for_wrapper_continue() -> bool:
-	if continue_path.is_empty(): return true
+	return await _wait_for_continue_path(continue_path)
+
+
+func _wait_for_continue_path(path: String) -> bool:
+	if path.is_empty(): return true
 	while Time.get_ticks_msec() < _deadline(15_000):
-		if FileAccess.file_exists(continue_path): return true
+		if FileAccess.file_exists(path): return true
 		lifecycle.update()
 		_tick_bridge_client()
 		await process_frame

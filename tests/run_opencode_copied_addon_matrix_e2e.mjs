@@ -162,14 +162,14 @@ function assertNoHostRuntimes(value) {
   }
 }
 
-function makeManagedEnvironment(fixture, providerUrl, eventPath, continuePath, resultPath) {
+function makeManagedEnvironment(fixture, providerUrl, eventPath, continuePath, mcpReadyAckPath, resultPath) {
   const PATH = restrictedPath(fixture)
   assertNoHostRuntimes(PATH)
   const home = path.join(fixture, "home")
   fs.mkdirSync(home, { recursive: true })
   const env = { ...process.env }
   for (const key of Object.keys(env)) if (/^(node_|npm_|bun_)/i.test(key) || ["NODE_OPTIONS", "NODE_PATH", "BUN_INSTALL"].includes(key)) delete env[key]
-  Object.assign(env, { PATH, HOME: home, TMPDIR: path.join(fixture, "tmp"), TEMP: path.join(fixture, "tmp"), TMP: path.join(fixture, "tmp"), XDG_CONFIG_HOME: path.join(fixture, "xdg/config"), XDG_DATA_HOME: path.join(fixture, "xdg/data"), XDG_CACHE_HOME: path.join(fixture, "xdg/cache"), GODOT_PROJECT_PATH: fixture, GODOT_MCP_SESSION_FILE: path.join(fixture, ".bridge-session/bridge-session.json"), GODOT_MCP_E2E_PROVIDER_BASE_URL: providerUrl, GODOT_MODE_SWITCH_EVENT_PATH: eventPath, GODOT_MODE_SWITCH_CONTINUE_PATH: continuePath, GODOT_MODE_SWITCH_RESULT_PATH: resultPath })
+  Object.assign(env, { PATH, HOME: home, TMPDIR: path.join(fixture, "tmp"), TEMP: path.join(fixture, "tmp"), TMP: path.join(fixture, "tmp"), XDG_CONFIG_HOME: path.join(fixture, "xdg/config"), XDG_DATA_HOME: path.join(fixture, "xdg/data"), XDG_CACHE_HOME: path.join(fixture, "xdg/cache"), GODOT_PROJECT_PATH: fixture, GODOT_MCP_SESSION_FILE: path.join(fixture, ".bridge-session/bridge-session.json"), GODOT_MCP_E2E_PROVIDER_BASE_URL: providerUrl, GODOT_MODE_SWITCH_EVENT_PATH: eventPath, GODOT_MODE_SWITCH_CONTINUE_PATH: continuePath, GODOT_MODE_SWITCH_MCP_READY_ACK_PATH: mcpReadyAckPath, GODOT_MODE_SWITCH_RESULT_PATH: resultPath })
   if (process.platform === "win32") Object.assign(env, { SystemRoot: process.env.SystemRoot || "C:\\Windows", WINDIR: process.env.WINDIR || "C:\\Windows", COMSPEC: process.env.COMSPEC || "C:\\Windows\\System32\\cmd.exe", PATHEXT: process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD", USERPROFILE: home, APPDATA: path.join(fixture, "appdata/roaming"), LOCALAPPDATA: path.join(fixture, "appdata/local") })
   for (const directory of [env.TMPDIR, env.XDG_CONFIG_HOME, env.XDG_DATA_HOME, env.XDG_CACHE_HOME, env.APPDATA, env.LOCALAPPDATA].filter(Boolean)) fs.mkdirSync(directory, { recursive: true })
   return env
@@ -190,21 +190,36 @@ function copyFixture(fixture, addon) {
 function readJsonWhenReady(file) { try { return exists(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null } catch { return null } }
 function pidAlive(pid) { try { process.kill(pid, 0); return true } catch { return false } }
 
-function processInfo(pid) {
-  if (!Number.isInteger(pid) || pid <= 0 || !pidAlive(pid)) return null
+function inspectProcess(pid) {
+  const diagnostic = { pid, alive_before: false, alive_after: false, query: process.platform }
+  if (!Number.isInteger(pid) || pid <= 0) return { info: null, diagnostic: { ...diagnostic, error: "invalid_pid" } }
+  diagnostic.alive_before = pidAlive(pid)
+  if (!diagnostic.alive_before) return { info: null, diagnostic: { ...diagnostic, error: "not_alive_before_query" } }
   try {
-    if (process.platform === "linux") return { pid, executable: fs.realpathSync(`/proc/${pid}/exe`), command: fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ") }
+    let info
+    if (process.platform === "linux") info = { pid, executable: fs.realpathSync(`/proc/${pid}/exe`), command: fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ") }
     if (process.platform === "darwin") {
-      const executable = execFileSync("ps", ["-p", String(pid), "-o", "comm="], { encoding: "utf8" }).trim()
-      const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim()
-      return executable ? { pid, executable, command } : null
+      const executable = execFileSync("ps", ["-p", String(pid), "-o", "comm="], { encoding: "utf8", timeout: 5000, maxBuffer: 4096 }).trim()
+      const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 5000, maxBuffer: 4096 }).trim()
+      info = executable ? { pid, executable, command } : null
     }
-    const command = "Get-Process -Id " + pid + " -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path | ConvertTo-Json -Compress"
-    const text = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true }).trim()
-    if (!text) return null
-    const item = JSON.parse(text)
-    return { pid, executable: item.Path || "", command: item.Path || "", name: item.ProcessName || "" }
-  } catch { return null }
+    if (process.platform === "win32") {
+      // Avoid Get-Process module discovery here for the same reason the
+      // managed sidecar identity implementation does: it can hang or fail in
+      // constrained environments. The framework API is direct and bounded.
+      const command = `$ErrorActionPreference='Stop';$p=[System.Diagnostics.Process]::GetProcessById(${pid});$e=[Text.Encoding]::UTF8;$path=[Convert]::ToBase64String($e.GetBytes($p.MainModule.FileName));$name=[Convert]::ToBase64String($e.GetBytes($p.ProcessName));[Console]::Out.Write($p.Id.ToString()+'|'+$path+'|'+$name)`
+      const text = execFileSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true, timeout: 5000, maxBuffer: 4096 }).trim()
+      const [observedPid, encodedPath, encodedName] = text.split("|", 3)
+      const executable = encodedPath ? Buffer.from(encodedPath, "base64").toString("utf8") : ""
+      const name = encodedName ? Buffer.from(encodedName, "base64").toString("utf8") : ""
+      info = Number(observedPid) === pid && executable ? { pid, executable, command: executable, name } : null
+    }
+    diagnostic.alive_after = pidAlive(pid)
+    return { info, diagnostic: info ? diagnostic : { ...diagnostic, error: "empty_process_query" } }
+  } catch (error) {
+    diagnostic.alive_after = pidAlive(pid)
+    return { info: null, diagnostic: { ...diagnostic, error: error?.code || error?.name || "process_query_failed" } }
+  }
 }
 
 function parentPid(pid) {
@@ -236,9 +251,13 @@ function assertLiveSidecar(event, fixture, addonTuple) {
   if (!event.launch_nonce || !event.owner_nonce || !Number.isInteger(Number(event.sidecar_pid)) || Number(event.sidecar_started_at_ms) <= 0) fail("mcp_ready lacks a nonce-bound sidecar identity")
   const expected = path.join(fixture, "addons/opencode_godot/bin", addonTuple, process.platform === "win32" ? "godot-mcp.exe" : "godot-mcp")
   if (normalize(event.sidecar_executable || "") !== normalize(expected)) fail(`mcp_ready sidecar executable is not the copied tuple payload: ${event.sidecar_executable}`)
-  const info = processInfo(Number(event.sidecar_pid))
+  const inspected = inspectProcess(Number(event.sidecar_pid))
+  const info = inspected.info
   const commandStartsWithPayload = (info?.command || "").replace(/^"/, "").startsWith(expected)
-  if (!info || (normalize(info.executable) !== normalize(expected) && !commandStartsWithPayload)) fail(`nonce-bound sidecar ${event.sidecar_pid} is not live from copied payload`)
+  if (!info || (normalize(info.executable) !== normalize(expected) && !commandStartsWithPayload)) {
+    const observed = info ? { executable: info.executable || "", name: info.name || "" } : null
+    fail(`nonce-bound sidecar is not live from copied payload: ${JSON.stringify({ diagnostic: inspected.diagnostic, observed })}`)
+  }
   return { pid: Number(event.sidecar_pid), startedAt: Number(event.sidecar_started_at_ms), executable: expected }
 }
 
@@ -335,8 +354,8 @@ async function run(options) {
     verifyPayload(path.join(fixture, "addons/opencode_godot"), addonTuple)
     provider = startProvider(fixture)
     const providerUrl = await waitProvider(provider)
-    const eventPath = path.join(fixture, "mode-switch-event.json"), continuePath = path.join(fixture, "continue-native-switch"), resultPath = path.join(fixture, "mode-switch-result.json")
-    const managedEnv = makeManagedEnvironment(fixture, providerUrl, eventPath, continuePath, resultPath)
+    const eventPath = path.join(fixture, "mode-switch-event.json"), continuePath = path.join(fixture, "continue-native-switch"), mcpReadyAckPath = path.join(fixture, "mcp-ready-ack"), resultPath = path.join(fixture, "mode-switch-result.json")
+    const managedEnv = makeManagedEnvironment(fixture, providerUrl, eventPath, continuePath, mcpReadyAckPath, resultPath)
     godotChild = spawn(godot, ["--headless", "--editor", "--path", fixture, "--script", "res://tests/opencode_integration_mode_switch_e2e_runner.gd"], { cwd: fixture, env: managedEnv, stdio: ["ignore", "pipe", "pipe"] })
     let output = ""; godotChild.stdout.on("data", (data) => { output += data }); godotChild.stderr.on("data", (data) => { output += data })
     const timeout = Number(options["timeout-seconds"] || 240) * 1000; const started = Date.now(); let native; let mcp
@@ -367,7 +386,11 @@ async function run(options) {
           }
         }
       }
-      if (event?.phase === "mcp_ready" && !mcp) { mcp = event; sidecar = assertLiveSidecar(event, fixture, addonTuple) }
+      if (event?.phase === "mcp_ready" && !mcp) {
+        mcp = event
+        sidecar = assertLiveSidecar(event, fixture, addonTuple)
+        fs.writeFileSync(mcpReadyAckPath, "live nonce-bound MCP sidecar observed")
+      }
       await sleep(75)
     }
     if (godotChild.exitCode === null) fail(`mode-switch E2E exceeded ${timeout / 1000} seconds`)
@@ -420,6 +443,9 @@ function selfTest() {
   if (fs.realpathSync.native(os.tmpdir()) !== canonicalTemporaryDirectory()) throw new Error("temporary-directory canonicalization self-test failed")
   if (!godotArchitectureMatches("windows-x64", "x86_64") || !godotArchitectureMatches("linux-glibc-arm64", "aarch64") || godotArchitectureMatches("windows-x64", "") || godotArchitectureMatches("macos-arm64", "x86_64")) throw new Error("architecture gate self-test failed")
   if (!parseArgs(["--tuple", "windows-x64", "--report", "report.json"]).report) throw new Error("CLI report parser self-test failed")
+  const current = inspectProcess(process.pid)
+  if (!current.info || current.info.pid !== process.pid || !current.info.executable || !current.diagnostic.alive_before || !current.diagnostic.alive_after) throw new Error(`process inspection self-test failed: ${JSON.stringify(current.diagnostic)}`)
+  if (inspectProcess(-1).diagnostic.error !== "invalid_pid") throw new Error("invalid process inspection self-test failed")
   try { parseArgs(["--reprot", "report.json"]); throw new Error("unknown CLI option was accepted") } catch (error) { if (!String(error.message).includes("unknown option")) throw error }
   if (!allowedGodot43Shutdown(1, "Godot Engine v4.3.stable.official.77dcf97d8 - https://godotengine.org\nWARNING: 1 RID of type \"Canvas\" were leaked.\nWARNING: 1 RID of type \"CanvasItem\" were leaked.\nWARNING: ObjectDB instances leaked at exit\nERROR: 1 RID allocations of type 'Canvas' were leaked at exit.")) throw new Error("shutdown-noise self-test failed")
   if (allowedGodot43Shutdown(1, "ERROR: unexpected")) throw new Error("shutdown-noise rejection self-test failed")
