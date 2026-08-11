@@ -263,10 +263,17 @@ func _wait_ready() -> bool:
 		if lifecycle.state == "ready" and websocket_server.is_session_ready():
 			return true
 		if lifecycle.state == "error":
+			_print_lifecycle_snapshot("OPENCODE_GODOT_MODE_SWITCH_NATIVE_READY_ERROR")
 			_expect(false, "lifecycle error: %s" % lifecycle.detail)
 			return false
 		await process_frame
-	print("OPENCODE_GODOT_MODE_SWITCH_NATIVE_READY_TIMEOUT state=%s detail=%s pid=%d runtime=%s listen=%s ownership=%s output_bytes=%d redaction_tail_bytes=%d" % [
+	_print_lifecycle_snapshot("OPENCODE_GODOT_MODE_SWITCH_NATIVE_READY_TIMEOUT")
+	return false
+
+
+func _print_lifecycle_snapshot(marker: String) -> void:
+	print("%s state=%s detail=%s pid=%d runtime=%s listen=%s ownership=%s output_bytes=%d redaction_tail_bytes=%d" % [
+		marker,
 		lifecycle.state,
 		lifecycle.detail,
 		lifecycle.daemon_pid,
@@ -276,8 +283,7 @@ func _wait_ready() -> bool:
 		lifecycle._output_buffer.length(),
 		lifecycle._redaction_tail.length(),
 	])
-	print("OPENCODE_GODOT_MODE_SWITCH_NATIVE_OUTPUT_TAIL %s" % JSON.stringify(_redacted_daemon_output_snapshot()))
-	return false
+	print("%s_OUTPUT_TAIL %s" % [marker, JSON.stringify(_redacted_daemon_output_snapshot())])
 
 
 func _redacted_daemon_output_snapshot() -> String:
@@ -310,9 +316,11 @@ func _wait_for_lifecycle_ready() -> bool:
 		if lifecycle.state == "ready":
 			return true
 		if lifecycle.state == "error":
+			_print_lifecycle_snapshot("OPENCODE_GODOT_MODE_SWITCH_MCP_READY_ERROR")
 			_expect(false, "lifecycle error: %s" % lifecycle.detail)
 			return false
 		await process_frame
+	_print_lifecycle_snapshot("OPENCODE_GODOT_MODE_SWITCH_MCP_READY_TIMEOUT")
 	return false
 
 
