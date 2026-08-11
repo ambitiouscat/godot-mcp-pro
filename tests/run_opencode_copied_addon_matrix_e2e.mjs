@@ -207,6 +207,19 @@ function processInfo(pid) {
   } catch { return null }
 }
 
+function parentPid(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || !pidAlive(pid)) return 0
+  try {
+    if (process.platform === "win32") {
+      const command = `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\").ParentProcessId`
+      const value = Number(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true }).trim())
+      return Number.isInteger(value) && value > 0 ? value : 0
+    }
+    const value = Number(execFileSync("ps", ["-p", String(pid), "-o", "ppid="], { encoding: "utf8" }).trim())
+    return Number.isInteger(value) && value > 0 ? value : 0
+  } catch { return 0 }
+}
+
 function fixturePayloads(fixture) {
   if (process.platform === "win32") {
     const command = "Get-Process -Name opencode,godot-mcp -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path | ConvertTo-Json -Compress"
@@ -327,6 +340,7 @@ async function run(options) {
     godotChild = spawn(godot, ["--headless", "--editor", "--path", fixture, "--script", "res://tests/opencode_integration_mode_switch_e2e_runner.gd"], { cwd: fixture, env: managedEnv, stdio: ["ignore", "pipe", "pipe"] })
     let output = ""; godotChild.stdout.on("data", (data) => { output += data }); godotChild.stderr.on("data", (data) => { output += data })
     const timeout = Number(options["timeout-seconds"] || 240) * 1000; const started = Date.now(); let native; let mcp
+    let mcpTriggerStarted = 0; let lastPayloadSample = 0; let lastPayloadSignature = ""; const mcpPayloadObservations = []
     while (godotChild.exitCode === null && Date.now() - started < timeout) {
       const event = readJsonWhenReady(eventPath)
       if (event?.phase === "native_ready" && !native) {
@@ -334,12 +348,31 @@ async function run(options) {
         if (fixturePayloads(fixture).some((item) => /godot-mcp/i.test(item.executable || item.command))) fail("native phase started a forbidden MCP sidecar")
         fs.writeFileSync(continuePath, "native phase observed")
       }
+      if (event?.phase === "mcp_triggering") {
+        if (!mcpTriggerStarted) mcpTriggerStarted = Date.now()
+        if (Date.now() - lastPayloadSample >= 250) {
+          lastPayloadSample = Date.now()
+          const payloads = fixturePayloads(fixture)
+          const signature = JSON.stringify(payloads.map((item) => ({ pid: item.pid, executable: normalize(item.executable || item.command || "") })))
+          if (signature === lastPayloadSignature && mcpPayloadObservations.length) {
+            mcpPayloadObservations.at(-1).last_elapsed_ms = Date.now() - mcpTriggerStarted
+          } else {
+            lastPayloadSignature = signature
+            mcpPayloadObservations.push({
+              elapsed_ms: Date.now() - mcpTriggerStarted,
+              payloads: payloads.map((item) => ({ pid: item.pid, parent_pid: parentPid(item.pid), executable: item.executable || item.command || "" })),
+              expected_daemon_pid: Number(event.daemon_pid || 0),
+              expected_sidecar: event.expected_sidecar || "",
+            })
+          }
+        }
+      }
       if (event?.phase === "mcp_ready" && !mcp) { mcp = event; sidecar = assertLiveSidecar(event, fixture, addonTuple) }
       await sleep(75)
     }
     if (godotChild.exitCode === null) fail(`mode-switch E2E exceeded ${timeout / 1000} seconds`)
     const exitCode = await waitForClose(godotChild)
-    if (!output.includes("OPENCODE_GODOT_INTEGRATION_MODE_SWITCH_E2E_OK")) fail(`Godot success marker missing:\n${output}`)
+    if (!output.includes("OPENCODE_GODOT_INTEGRATION_MODE_SWITCH_E2E_OK")) fail(`Godot success marker missing:\n${output}\nOPENCODE_GODOT_MODE_SWITCH_PAYLOAD_OBSERVATIONS ${JSON.stringify(mcpPayloadObservations)}`)
     if (/SCRIPT ERROR|TEST FAILURE|mode-switch runner failure/i.test(output)) fail(`Godot runner reported script/test failure:\n${output}`)
     if (exitCode !== 0 && !allowedGodot43Shutdown(exitCode, output)) fail(`Godot exited ${exitCode} outside the exact accepted Godot 4.3 shutdown RID-leak signature:\n${output}`)
     const result = readJsonWhenReady(resultPath)

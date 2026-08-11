@@ -183,6 +183,10 @@ func _switch_native_to_mcp() -> void:
 	mcp_trigger_last_capture_ms = 0
 	mcp_trigger_last_signature = ""
 	mcp_trigger_observations.clear()
+	_publish_event("mcp_triggering", {
+		"daemon_pid": lifecycle.daemon_pid,
+		"expected_sidecar": str(lifecycle._payload.get("mcp_path", "")),
+	})
 	_capture_mcp_trigger_observation(true)
 	var mcp_trigger := await _http_json(HTTPClient.METHOD_GET, "/mcp")
 	_capture_mcp_trigger_observation(true)
