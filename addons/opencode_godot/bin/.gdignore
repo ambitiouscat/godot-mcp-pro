@@ -1,0 +1,1 @@
+# Payload executables are launched through absolute filesystem paths. Godot must not import them.

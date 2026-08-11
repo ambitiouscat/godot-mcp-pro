@@ -1,0 +1,13 @@
+{
+  "fixture": "fragmented-sse",
+  "endpoint": "v2.session.events",
+  "chunks": [
+    "id: evt_0001\nevent: session.next.text.ended\ndata: {\"id\":\"evt_0001\",\"type\":\"session.next.text.ended\",\"durable\":{\"aggregateID\":\"ses_demo\",\"seq\":2,\"version\":1},\n",
+    "data: \"location\":{\"directory\":\"C:/workspace/godot-demo\"},\"data\":{\"timestamp\":1710000000000,\"sessionID\":\"ses_demo\",\"assistantMessageID\":\"msg_assistant\",\"textID\":\"text_1\",\"text\":\"Hello Godot\"}}\n\n",
+    ": keep-alive\n\n",
+    "id: evt_0002\ndata: {\"id\":\"evt_0002\",\"type\":\"session.next.tool.called\",\"durable\":{\"aggregateID\":\"ses_demo\",\"seq\":3,\"version\":1},\"data\":{\"timestamp\":1710000000100,\"sessionID\":\"ses_demo\",\"assistantMessageID\":\"msg_assistant\",\"callID\":\"call_1\",\"tool\":\"godot_scene\",\"input\":{},\"provider\":{\"executed\":true}}}\n\n"
+  ],
+  "expected_ids": ["evt_0001", "evt_0002"],
+  "expected_types": ["session.next.text.ended", "session.next.tool.called"],
+  "expected_order": [2, 3]
+}

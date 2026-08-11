@@ -7,7 +7,7 @@ AI-powered Godot गेम डेवलपमेंट के लिए प्�
 ## Architecture
 
 ```
-AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket:6505—→ Godot Editor Plugin
+AI Assistant ←—stdio/MCP—→ Node.js Server ←—Authenticated WebSocket (OS-assigned per-project loopback port)—→ Godot Editor Plugin
 ```
 
 - **Real-time**: WebSocket connection से instant feedback मिलता है, file polling की जरूरत नहीं
@@ -43,10 +43,7 @@ npm run build
   "mcpServers": {
     "godot-mcp-pro": {
       "command": "node",
-      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"],
-      "env": {
-        "GODOT_MCP_PORT": "6505"
-      }
+      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"]
     }
   }
 }
@@ -375,7 +372,7 @@ Plugin enabled state में अपना Godot project खोलें, फ�
 
 - **UndoRedo Integration**: सभी node/property operations Ctrl+Z support करती हैं
 - **Smart Type Parsing**: `"Vector2(100, 200)"`, `"#ff0000"`, `"Color(1,0,0)"` auto-converted
-- **Auto-Reconnect**: Exponential backoff reconnection (1s → 2s → 4s ... → 60s max)
+- **Auto-Reconnect**: Bounded exponential backoff with ±20% jitter (250ms → 500ms → 1s ... → 5s max)
 - **Heartbeat**: 10s ping/pong connection alive रखता है
 - **Helpful Errors**: Error responses में अगले steps के लिए suggestions शामिल
 
@@ -459,11 +456,11 @@ Plugin enabled state में अपना Godot project खोलें, फ�
 |--------|--------------|-------------------|
 | **Protocol** | JSON-RPC 2.0 (standard, extensible) | Custom JSON या CLI-based |
 | **Connection** | Heartbeat के साथ persistent WebSocket | Per-command subprocess या raw TCP |
-| **Reliability** | Exponential backoff के साथ auto-reconnect (1s→60s) | Manual reconnection required |
+| **Reliability** | Bounded exponential backoff के साथ auto-reconnect (250ms→5s) | Manual reconnection required |
 | **Type Safety** | Smart type parsing (Vector2, Color, Rect2, hex colors) | String-only या limited types |
 | **Error Handling** | Codes + suggestions के साथ structured errors | Generic error messages |
 | **Undo Support** | सभी mutations UndoRedo system से गुजरती हैं | Direct modifications (no undo) |
-| **Port Management** | Ports 6505-6509 auto-scan | Fixed port, conflicts possible |
+| **Port Management** | OS-assigned per-project loopback port | Fixed port, conflicts possible |
 
 ## License
 

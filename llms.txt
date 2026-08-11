@@ -8,9 +8,9 @@ Godot MCP Pro is an MCP server that gives AI assistants real-time access to the 
 
 ## Architecture
 
-AI Assistant <--stdio/MCP--> Node.js Server (TypeScript) <--WebSocket:6505--> Godot Editor Plugin (GDScript)
+AI Assistant <--stdio/MCP--> Node.js Agent (TypeScript) <--authenticated project-discovered WebSocket--> Godot Editor Plugin (GDScript)
 
-The Godot plugin runs a WebSocket server inside the editor. The MCP server connects to it and translates MCP tool calls into editor commands. All mutations go through Godot's UndoRedo system.
+The Node.js agent binds an OS-selected 127.0.0.1 port and atomically publishes a short-lived per-project discovery record. The Godot plugin connects outward and both sides complete a reciprocal HMAC-SHA256 handshake before commands enter READY. Fixed-port scanning and raw-token authentication are not supported. All editor commands are deferred to the Godot main thread and revalidate the active project session.
 
 ## 162 Tools across 23 Categories
 
@@ -49,7 +49,8 @@ The Godot plugin runs a WebSocket server inside the editor. The MCP server conne
 1. Copy addons/godot_mcp/ into your Godot project
 2. Enable plugin: Project > Project Settings > Plugins > Godot MCP Pro
 3. Build MCP server: cd server && npm install && npm run build
-4. Add to .mcp.json: {"mcpServers": {"godot-mcp-pro": {"command": "node", "args": ["/path/to/server/build/index.js"]}}}
+4. Add to .mcp.json: {"mcpServers": {"godot-mcp-pro": {"command": "node", "args": ["/path/to/server/build/index.js"], "env": {"GODOT_PROJECT_PATH": "/absolute/project/path"}}}}
+5. Open the Godot project with the plugin enabled before starting the AI client; never persist token or discovery-port values in client configuration.
 
 ## Pricing
 

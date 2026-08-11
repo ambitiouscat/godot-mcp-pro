@@ -7,7 +7,7 @@ Servidor MCP (Model Context Protocol) premium para desarrollo de juegos con Godo
 ## Arquitectura
 
 ```
-AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket:6505—→ Godot Editor Plugin
+AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket autenticado (puerto loopback por proyecto asignado por el SO)—→ Godot Editor Plugin
 ```
 
 - **Tiempo real**: La conexión WebSocket ofrece retroalimentación instantánea, sin polling de archivos
@@ -43,10 +43,7 @@ Agrega a tu `.mcp.json`:
   "mcpServers": {
     "godot-mcp-pro": {
       "command": "node",
-      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"],
-      "env": {
-        "GODOT_MCP_PORT": "6505"
-      }
+      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"]
     }
   }
 }
@@ -375,7 +372,7 @@ Abre tu proyecto de Godot con el plugin activado y usa Claude Code para interact
 
 - **Integración UndoRedo**: Todas las operaciones de nodo/propiedad soportan Ctrl+Z
 - **Parseo Inteligente de Tipos**: `"Vector2(100, 200)"`, `"#ff0000"`, `"Color(1,0,0)"` se convierten automáticamente
-- **Reconexión Automática**: Reconexión con backoff exponencial (1s → 2s → 4s ... → 60s máx)
+- **Reconexión Automática**: Backoff exponencial limitado con jitter de ±20% (250ms → 500ms → 1s ... → 5s máx)
 - **Heartbeat**: Ping/pong cada 10s mantiene la conexión activa
 - **Errores Útiles**: Las respuestas de error incluyen sugerencias para los próximos pasos
 
@@ -459,11 +456,11 @@ Abre tu proyecto de Godot con el plugin activado y usa Claude Code para interact
 |--------|--------------|-------------------|
 | **Protocolo** | JSON-RPC 2.0 (estándar, extensible) | JSON personalizado o basado en CLI |
 | **Conexión** | WebSocket persistente con heartbeat | Subproceso por comando o TCP sin procesar |
-| **Confiabilidad** | Reconexión automática con backoff exponencial (1s→60s) | Reconexión manual requerida |
+| **Confiabilidad** | Reconexión automática con backoff limitado (250ms→5s) | Reconexión manual requerida |
 | **Seguridad de tipos** | Parseo inteligente de tipos (Vector2, Color, Rect2, colores hex) | Solo strings o tipos limitados |
 | **Manejo de errores** | Errores estructurados con códigos + sugerencias | Mensajes de error genéricos |
 | **Soporte de Undo** | Todas las mutaciones pasan por el sistema UndoRedo | Modificaciones directas (sin undo) |
-| **Gestión de puertos** | Auto-escaneo de puertos 6505-6509 | Puerto fijo, posibles conflictos |
+| **Gestión de puertos** | Puerto loopback por proyecto asignado por el SO | Puerto fijo, posibles conflictos |
 
 ## Licencia
 

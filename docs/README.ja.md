@@ -7,7 +7,7 @@ AI駆動のGodotゲーム開発のためのプレミアムMCP（Model Context Pr
 ## アーキテクチャ
 
 ```
-AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket:6505—→ Godot Editor Plugin
+AI Assistant ←—stdio/MCP—→ Node.js Server ←—認証済み WebSocket（OS 割り当てのプロジェクト専用ループバックポート）—→ Godot Editor Plugin
 ```
 
 - **リアルタイム**: WebSocket接続により即座にフィードバック、ファイルポーリング不要
@@ -43,10 +43,7 @@ npm run build
   "mcpServers": {
     "godot-mcp-pro": {
       "command": "node",
-      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"],
-      "env": {
-        "GODOT_MCP_PORT": "6505"
-      }
+      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"]
     }
   }
 }
@@ -375,7 +372,7 @@ Liteモードに含まれるツール: project、scene、node、script、editor�
 
 - **UndoRedo統合**: すべてのノード/プロパティ操作がCtrl+Zに対応
 - **スマート型変換**: `"Vector2(100, 200)"`、`"#ff0000"`、`"Color(1,0,0)"` を自動変換
-- **自動再接続**: 指数バックオフによる再接続（1秒 → 2秒 → 4秒 ... → 最大60秒）
+- **自動再接続**: ±20% ジッター付きの有界指数バックオフ（250ミリ秒 → 500ミリ秒 → 1秒 ... → 最大5秒）
 - **ハートビート**: 10秒間隔のping/pongで接続を維持
 - **親切なエラー**: エラーレスポンスに次のステップのサジェスションを含む
 
@@ -459,11 +456,11 @@ Liteモードに含まれるツール: project、scene、node、script、editor�
 |--------|--------------|-------------------|
 | **プロトコル** | JSON-RPC 2.0（標準、拡張可能） | カスタムJSONまたはCLIベース |
 | **接続** | ハートビート付き永続WebSocket | コマンドごとのサブプロセスまたは生TCP |
-| **信頼性** | 指数バックオフ付き自動再接続（1秒→60秒） | 手動再接続が必要 |
+| **信頼性** | 有界指数バックオフ付き自動再接続（250ミリ秒→5秒） | 手動再接続が必要 |
 | **型安全性** | スマート型変換（Vector2、Color、Rect2、16進カラー） | 文字列のみまたは限定的な型 |
 | **エラーハンドリング** | コード + サジェスション付き構造化エラー | 汎用エラーメッセージ |
 | **Undoサポート** | すべての変更がUndoRedoシステムを経由 | 直接変更（Undo不可） |
-| **ポート管理** | ポート6505-6509の自動スキャン | 固定ポート、競合の可能性 |
+| **ポート管理** | OS 割り当てのプロジェクト専用ループバックポート | 固定ポート、競合の可能性 |
 
 ## ライセンス
 

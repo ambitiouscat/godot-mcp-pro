@@ -7,7 +7,7 @@
 ## 架构
 
 ```
-AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket:6505—→ Godot Editor Plugin
+AI Assistant ←—stdio/MCP—→ Node.js Server ←—已认证 WebSocket（操作系统分配的项目专用回环端口）—→ Godot Editor Plugin
 ```
 
 - **实时通信**：WebSocket 连接意味着即时反馈，无需文件轮询
@@ -43,10 +43,7 @@ npm run build
   "mcpServers": {
     "godot-mcp-pro": {
       "command": "node",
-      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"],
-      "env": {
-        "GODOT_MCP_PORT": "6505"
-      }
+      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"]
     }
   }
 }
@@ -375,7 +372,7 @@ Lite 模式包含：project、scene、node、script、editor、input、runtime �
 
 - **UndoRedo 集成**：所有节点/属性操作支持 Ctrl+Z
 - **智能类型解析**：`"Vector2(100, 200)"`、`"#ff0000"`、`"Color(1,0,0)"` 自动转换
-- **自动重连**：指数退避重连（1秒 → 2秒 → 4秒 ... → 最大60秒）
+- **自动重连**：带 ±20% 抖动的指数退避重连（250毫秒 → 500毫秒 → 1秒 ... → 最大5秒）
 - **心跳检测**：10秒 ping/pong 保持连接活跃
 - **友好的错误提示**：错误响应包含下一步操作建议
 
@@ -459,11 +456,11 @@ Lite 模式包含：project、scene、node、script、editor、input、runtime �
 |--------|--------------|-------------------|
 | **协议** | JSON-RPC 2.0（标准、可扩展） | 自定义 JSON 或基于 CLI |
 | **连接** | 带心跳的持久 WebSocket | 每命令子进程或原始 TCP |
-| **可靠性** | 指数退避自动重连（1秒→60秒） | 需要手动重连 |
+| **可靠性** | 有界指数退避自动重连（250毫秒→5秒） | 需要手动重连 |
 | **类型安全** | 智能类型解析（Vector2、Color、Rect2、十六进制颜色） | 仅字符串或有限类型 |
 | **错误处理** | 带代码 + 建议的结构化错误 | 通用错误消息 |
 | **撤销支持** | 所有修改通过 UndoRedo 系统 | 直接修改（无法撤销） |
-| **端口管理** | 自动扫描端口 6505-6509 | 固定端口，可能冲突 |
+| **端口管理** | 操作系统分配的项目专用回环端口 | 固定端口，可能冲突 |
 
 ## 许可证
 

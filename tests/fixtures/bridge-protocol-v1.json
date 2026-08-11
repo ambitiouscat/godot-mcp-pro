@@ -1,0 +1,37 @@
+{
+  "protocol_version": 1,
+  "handshake_timeout_ms": 5000,
+  "proof_domain": "godot-ai-bridge-v1",
+  "hmac_vector": {
+    "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "project_path": "c:/work/game",
+    "owner_nonce": "AAECAwQFBgcICQoLDA0ODw",
+    "client_nonce": "EBESExQVFhcYGRobHB0eHw",
+    "server_nonce": "ICEiIyQlJicoKSorLC0uLw",
+    "server_proof": "ujNK9XKYdwFrjO7KaVhc9cLSU-BBchXvt-IpJRT9K3s",
+    "client_proof": "Xzwd_ceYbr_xgOa55Hi8A-q1b_zrpB9HYLUJ3Ape1u0"
+  },
+  "process_identity_linux_v1": {
+    "boot_id": "550e8400-e29b-41d4-a716-446655440000",
+    "start_ticks": "123456789",
+    "identity": 6128128571249836,
+    "changed_boot_id": "550e8400-e29b-41d4-a716-446655440001",
+    "changed_ticks": "123456790"
+  },
+  "canonical_paths": [
+    { "platform": "win32", "input": "C:\\Work\\Game\\.\\assets\\..\\", "output": "c:/work/game" },
+    { "platform": "win32", "input": "\\\\SERVER\\Share\\Game\\..\\Game\\", "output": "//server/share/game" },
+    { "platform": "win32", "input": "\\\\SERVER\\Share\\", "output": "//server/share/" },
+    { "platform": "linux", "input": "/Work/./Game/../Game/", "output": "/Work/Game" },
+    { "platform": "darwin", "input": "/é/./游戏/../游戏", "output": "/é/游戏" }
+  ],
+  "errors": {
+    "bridge_not_ready": -32000,
+    "authentication_failed": -32001,
+    "project_mismatch": -32002,
+    "unsupported_protocol": -32003,
+    "handshake_timeout": -32004
+  },
+  "close_codes": { "protocol": 1002, "policy": 1008 },
+  "state_steps": ["HANDSHAKING", "bridge.handshake", "bridge.authenticate", "READY"]
+}

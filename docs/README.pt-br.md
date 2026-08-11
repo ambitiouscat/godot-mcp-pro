@@ -7,7 +7,7 @@ Servidor MCP (Model Context Protocol) premium para desenvolvimento de jogos Godo
 ## Arquitetura
 
 ```
-AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket:6505—→ Godot Editor Plugin
+AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket autenticado (porta loopback por projeto atribuída pelo SO)—→ Godot Editor Plugin
 ```
 
 - **Tempo real**: Conexão WebSocket significa feedback instantâneo, sem polling de arquivos
@@ -43,10 +43,7 @@ Adicione ao seu `.mcp.json`:
   "mcpServers": {
     "godot-mcp-pro": {
       "command": "node",
-      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"],
-      "env": {
-        "GODOT_MCP_PORT": "6505"
-      }
+      "args": ["D:/dev/godot-mcp-pro/server/build/index.js"]
     }
   }
 }
@@ -375,7 +372,7 @@ Abra seu projeto Godot com o plugin ativado e use o Claude Code para interagir c
 
 - **Integração UndoRedo**: Todas as operações de nó/propriedade suportam Ctrl+Z
 - **Parsing Inteligente de Tipos**: `"Vector2(100, 200)"`, `"#ff0000"`, `"Color(1,0,0)"` convertidos automaticamente
-- **Reconexão Automática**: Reconexão com backoff exponencial (1s → 2s → 4s ... → 60s máx)
+- **Reconexão Automática**: Backoff exponencial limitado com jitter de ±20% (250ms → 500ms → 1s ... → 5s máx)
 - **Heartbeat**: Ping/pong a cada 10s mantém a conexão ativa
 - **Erros Úteis**: Respostas de erro incluem sugestões para próximos passos
 
@@ -459,11 +456,11 @@ Abra seu projeto Godot com o plugin ativado e use o Claude Code para interagir c
 |--------|--------------|-------------------|
 | **Protocolo** | JSON-RPC 2.0 (padrão, extensível) | JSON customizado ou baseado em CLI |
 | **Conexão** | WebSocket persistente com heartbeat | Subprocesso por comando ou TCP bruto |
-| **Confiabilidade** | Reconexão automática com backoff exponencial (1s→60s) | Reconexão manual necessária |
+| **Confiabilidade** | Reconexão automática com backoff limitado (250ms→5s) | Reconexão manual necessária |
 | **Segurança de tipos** | Parsing inteligente de tipos (Vector2, Color, Rect2, cores hex) | Apenas strings ou tipos limitados |
 | **Tratamento de erros** | Erros estruturados com códigos + sugestões | Mensagens de erro genéricas |
 | **Suporte a Undo** | Todas as mutações passam pelo sistema UndoRedo | Modificações diretas (sem undo) |
-| **Gerenciamento de porta** | Auto-scan de portas 6505-6509 | Porta fixa, possíveis conflitos |
+| **Gerenciamento de porta** | Porta loopback por projeto atribuída pelo SO | Porta fixa, possíveis conflitos |
 
 ## Licença
 

@@ -5,3 +5,8 @@
 /**        export-ignore
 /addons    !export-ignore
 /addons/** !export-ignore
+
+# Keep generated plugin bytes and fixture EOF stable; their manifest/hash
+# verification covers content integrity independently of diff whitespace.
+addons/opencode_godot/runtime/opencode-plugins/godot-tools.js whitespace=-trailing-space
+tests/fixture/project.godot whitespace=-blank-at-eof

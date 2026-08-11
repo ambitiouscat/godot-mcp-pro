@@ -1,16 +1,26 @@
 # Godot MCP Pro
 
-Premium MCP (Model Context Protocol) server for AI-powered Godot game development. Connects AI assistants like Claude directly to your Godot editor with **175 powerful tools**.
+Premium MCP (Model Context Protocol) server for AI-powered Godot game development. Connects AI assistants like Claude directly to your Godot editor with **178 powerful tools**.
 
 ## Architecture
 
 ```
-AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket:6505—→ Godot Editor Plugin
+AI Assistant ←—stdio/MCP—→ Node.js Agent ←—authenticated discovered WebSocket—→ Godot Editor Plugin
 ```
 
 - **Real-time**: WebSocket connection means instant feedback, no file polling
+- **Project-bound security**: A fresh protected session, reciprocal HMAC handshake, and process identity checks gate every connection
+- **No fixed ports**: The agent binds one OS-selected `127.0.0.1` port and publishes a short-lived project discovery record
 - **Editor Integration**: Full access to Godot's editor API, UndoRedo system, and scene tree
 - **JSON-RPC 2.0**: Standard protocol with proper error codes and suggestions
+
+Process ownership is authorized jointly by PID, its matching process-start
+identity, and the fresh session nonce. On Linux, the compatibility-named
+`*_started_at_ms` identity is an opaque safe integer in `[2^52, 2^53-1]`, not an
+epoch/order/duration value; discovery `created_at_ms` and `expires_at_ms` remain
+epoch milliseconds. Legacy, malformed, or unreadable identities fail closed as
+`UNKNOWN` while liveness is unproven, whereas a confirmed absent PID or zombie
+is `STALE`. See [SECURITY.md](SECURITY.md) for the derivation and cleanup rules.
 
 ## What's in this repo
 
@@ -22,6 +32,20 @@ AI Assistant ←—stdio/MCP—→ Node.js Server ←—WebSocket:6505—→ God
 > The paid zip includes the addon, the `server/` directory with pre-built JavaScript, `INSTALL.md`, and AI-client instructions. If you cloned this repo and don't see a `server/` folder, **that's expected** — grab the full package from one of the links above.
 
 ## Quick Start
+
+### Unified OpenCode for Godot addon
+
+The repository also contains `addons/opencode_godot`, a Godot 4.3+ native
+right-dock integration that bundles the hardened Godot bridge and, in a
+packaged release, self-contained OpenCode `1.17.18` and MCP `1.16.0`
+executables. Copy that one directory into a project and enable **OpenCode for
+Godot**; do not enable the legacy `godot_mcp` plugin at the same time. It uses a
+native GDScript HTTP/SSE client and does not require Node, Bun, npm, WebView, or
+a system browser runtime. Source checkouts may contain only a partial native
+payload; the dock reports missing/unsigned targets rather than pretending they
+are a full release. See
+[`addons/opencode_godot/README.md`](addons/opencode_godot/README.md) for install,
+status, security, upgrade, migration, and rollback details.
 
 ### 1. Install the Godot Plugin
 
@@ -48,14 +72,17 @@ Add to your `.mcp.json`:
   "mcpServers": {
     "godot-mcp-pro": {
       "command": "node",
-      "args": ["/path/to/server/build/index.js"],
-      "env": {
-        "GODOT_MCP_PORT": "6505"
-      }
+      "args": ["/path/to/server/build/index.js"]
     }
   }
 }
 ```
+
+Open the Godot project and enable the plugin before starting or restarting the
+AI client. The editor creates a protected per-project session contract; the
+agent consumes it using `GODOT_PROJECT_PATH` or the explicit absolute
+`GODOT_MCP_SESSION_FILE` supplied by a managed launcher. Credentials and ports
+must not be copied into `.mcp.json`.
 
 ### 4. Choose Your Mode
 
@@ -63,7 +90,7 @@ Godot MCP Pro offers four modes to fit any client's tool limit:
 
 | Mode | Tools | Best For |
 |------|-------|----------|
-| **Full** (default) | 175 | Claude Code, Cline, VS Code Copilot, Cursor |
+| **Full** (default) | 178 | Claude Code, Cline, VS Code Copilot, Cursor |
 | **3D** (`--3d`) | 103 | Antigravity and other 100-tool-limit clients needing 3D |
 | **Lite** (`--lite`) | 84 | Windsurf, JetBrains Junie, Gemini CLI |
 | **Minimal** (`--minimal`) | 35 | OpenCode, local LLMs with small context |
@@ -106,10 +133,11 @@ node /path/to/server/build/cli.js node add --type CharacterBody3D --name Player
 
 Replace `/path/to/` with the actual path where you extracted the files.
 
-The CLI connects directly to the Godot editor plugin via WebSocket. It requires:
+The CLI starts a temporary protocol-v1 listener and waits for the Godot editor
+to authenticate. It requires:
 - Godot editor running with the MCP plugin enabled
 - Server built (`node build/setup.js install`)
-- An available port in the 6510-6514 range
+- No other live agent owning the same project's discovery session
 
 **Advantage**: LLMs discover capabilities progressively via `--help` instead of loading all tool definitions upfront. This works with any LLM client that has terminal access, regardless of tool count limits.
 
@@ -133,7 +161,7 @@ The CLI connects directly to the Godot editor plugin via WebSocket. It requires:
 
 Open your Godot project with the plugin enabled, then use Claude Code to interact with the editor.
 
-## All 175 Tools
+## All 178 Tools
 
 ### Project Tools (7)
 | Tool | Description |
@@ -146,7 +174,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `uid_to_project_path` | UID → res:// conversion |
 | `project_path_to_uid` | res:// → UID conversion |
 
-### Scene Tools (9)
+### Scene Tools (10)
 | Tool | Description |
 |------|-------------|
 | `get_scene_tree` | Live scene tree with hierarchy |
@@ -158,6 +186,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `play_scene` | Run scene (main/current/custom) |
 | `stop_scene` | Stop running scene |
 | `save_scene` | Save current scene to disk |
+| `get_scene_exports` | Inspect exported variables on scripted scene nodes |
 
 ### Node Tools (17)
 | Tool | Description |
@@ -192,7 +221,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `validate_script` | Validate GDScript syntax |
 | `search_in_files` | Search content in project files |
 
-### Editor Tools (9)
+### Editor Tools (12)
 | Tool | Description |
 |------|-------------|
 | `get_editor_errors` | Get errors and stack traces |
@@ -204,6 +233,9 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `reload_plugin` | Reload the MCP plugin (auto-reconnect) |
 | `reload_project` | Rescan filesystem and reload scripts |
 | `get_output_log` | Get output panel content |
+| `set_auto_dismiss` | Configure automatic dismissal of blocking editor dialogs |
+| `get_editor_camera` | Inspect the current 3D editor viewport camera |
+| `set_editor_camera` | Position the 3D editor viewport camera |
 
 ### Input Tools (7)
 | Tool | Description |
@@ -216,7 +248,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `get_input_actions` | List all input actions |
 | `set_input_action` | Create/modify input action |
 
-### Runtime Tools (19)
+### Runtime Tools (20)
 | Tool | Description |
 |------|-------------|
 | `get_game_scene_tree` | Scene tree of running game |
@@ -224,7 +256,9 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `set_game_node_property` | Set node property in running game |
 | `execute_game_script` | Run GDScript in game context |
 | `capture_frames` | Multi-frame screenshot capture |
+| `record_frames` | Record a longer frame sequence to project-local files |
 | `monitor_properties` | Record property values over time |
+| `watch_signals` | Monitor live signal emissions over time |
 | `start_recording` | Start input recording |
 | `stop_recording` | Stop input recording |
 | `replay_recording` | Replay recorded input |
@@ -258,7 +292,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `tilemap_get_info` | TileMapLayer info and tile set sources |
 | `tilemap_get_used_cells` | List of used cells |
 
-### Theme & UI Tools (6)
+### Theme & UI Tools (7)
 | Tool | Description |
 |------|-------------|
 | `create_theme` | Create Theme resource file |
@@ -267,6 +301,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `set_theme_font_size` | Set theme font size override |
 | `set_theme_stylebox` | Set StyleBoxFlat override |
 | `get_theme_info` | Get theme overrides info |
+| `setup_control` | Configure a Control node's layout, anchors, and theme values |
 
 ### Profiling Tools (2)
 | Tool | Description |
@@ -274,7 +309,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `get_performance_monitors` | All performance monitors (FPS, memory, physics, etc.) |
 | `get_editor_performance` | Quick performance summary |
 
-### Batch & Refactoring Tools (8)
+### Batch & Refactoring Tools (9)
 | Tool | Description |
 |------|-------------|
 | `find_nodes_by_type` | Find all nodes of a type |
@@ -285,6 +320,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `cross_scene_set_property` | Set property across all scenes |
 | `find_script_references` | Find where script/resource is used |
 | `detect_circular_dependencies` | Find circular scene dependencies |
+| `batch_add_nodes` | Add multiple nodes in one validated operation |
 
 ### Shader Tools (6)
 | Tool | Description |
@@ -342,7 +378,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `apply_particle_preset` | Apply preset (fire, smoke, sparks, etc.) |
 | `get_particle_info` | Get particle system details |
 
-### Navigation Tools (6)
+### Navigation Tools (5)
 | Tool | Description |
 |------|-------------|
 | `setup_navigation_region` | Configure NavigationRegion |
@@ -399,12 +435,26 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `run_stress_test` | Run performance stress test |
 | `get_test_report` | Get test results report |
 
+### Android Deployment Tools (3)
+| Tool | Description |
+|------|-------------|
+| `list_android_devices` | List connected Android devices and their state |
+| `get_android_preset_info` | Inspect Android export preset and deployment readiness |
+| `deploy_to_android` | Build, install, and optionally launch on a selected device |
+
+### Headless Tools (3)
+| Tool | Description |
+|------|-------------|
+| `run_headless_scene` | Run a scene in a bounded headless Godot process |
+| `run_headless_script` | Execute a script in a bounded headless Godot process |
+| `get_godot_executable` | Resolve the Godot executable used for headless commands |
+
 ## Key Features
 
 - **UndoRedo Integration**: All node/property operations support Ctrl+Z
 - **Smart Type Parsing**: `"Vector2(100, 200)"`, `"#ff0000"`, `"Color(1,0,0)"` auto-converted
-- **Auto-Reconnect**: Exponential backoff reconnection (1s → 2s → 4s ... → 60s max)
-- **Heartbeat**: 10s ping/pong keeps connection alive
+- **Auto-Reconnect**: Jittered exponential discovery/reconnect backoff from 250 ms to a 5 s cap, reset after 30 s of stable READY state
+- **Heartbeat**: Authenticated ping/pong detects dead peers without accepting pre-READY commands
 - **Helpful Errors**: Error responses include suggestions for next steps
 
 ## Competitive Comparison
@@ -414,24 +464,24 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | Category | Godot MCP Pro | GDAI MCP ($19) | tomyud1 (free) | Dokujaa (free) | Coding-Solo (free) | ee0pdt (free) | bradypp (free) |
 |----------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | Project | 7 | 5 | 4 | 0 | 2 | 2 | 2 |
-| Scene | 9 | 8 | 11 | 9 | 3 | 4 | 5 |
-| Node | **14** | 8 | 0 | 8 | 2 | 3 | 0 |
+| Scene | 10 | 8 | 11 | 9 | 3 | 4 | 5 |
+| Node | **17** | 8 | 0 | 8 | 2 | 3 | 0 |
 | Script | **8** | 5 | 6 | 4 | 0 | 5 | 0 |
-| Editor | **9** | 5 | 1 | 5 | 1 | 3 | 2 |
+| Editor | **12** | 5 | 1 | 5 | 1 | 3 | 2 |
 | Input | **7** | 2 | 0 | 0 | 0 | 0 | 0 |
-| Runtime | **19** | 0 | 0 | 0 | 0 | 0 | 0 |
+| Runtime | **20** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Animation | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
 | TileMap | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
-| Theme/UI | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
+| Theme/UI | **7** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Profiling | **2** | 0 | 0 | 0 | 0 | 0 | 0 |
-| Batch/Refactor | **8** | 0 | 0 | 0 | 0 | 0 | 0 |
+| Batch/Refactor | **9** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Shader | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Export | **3** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Resource | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Physics | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
 | 3D Scene | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Particle | **5** | 0 | 0 | 0 | 0 | 0 | 0 |
-| Navigation | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
+| Navigation | **5** | 0 | 0 | 0 | 0 | 0 | 0 |
 | Audio | **6** | 0 | 0 | 0 | 0 | 0 | 0 |
 | AnimationTree | **4** | 0 | 0 | 0 | 0 | 0 | 0 |
 | State Machine | **3** | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -442,7 +492,8 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | Material | 0 | 0 | 0 | 2 | 0 | 0 | 0 |
 | Other | 0 | 0 | 9 | 5 | 5 | 2 | 1 |
 | Android Deploy | **3** | 0 | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **175** | ~30 | **32** | **39** | **13** | **19** | **10** |
+| Headless | **3** | 0 | 0 | 0 | 0 | 0 | 0 |
+| **Total** | **178** | ~30 | **32** | **39** | **13** | **19** | **10** |
 
 ### Feature Matrix
 
@@ -488,11 +539,11 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 |--------|--------------|-------------------|
 | **Protocol** | JSON-RPC 2.0 (standard, extensible) | Custom JSON or CLI-based |
 | **Connection** | Persistent WebSocket with heartbeat | Per-command subprocess or raw TCP |
-| **Reliability** | Auto-reconnect with exponential backoff (1s→60s) | Manual reconnection required |
+| **Reliability** | Authenticated auto-reconnect with bounded exponential backoff | Manual reconnection required |
 | **Type Safety** | Smart type parsing (Vector2, Color, Rect2, hex colors) | String-only or limited types |
 | **Error Handling** | Structured errors with codes + suggestions | Generic error messages |
 | **Undo Support** | All mutations go through UndoRedo system | Direct modifications (no undo) |
-| **Port Management** | Auto-scan ports 6505-6509 | Fixed port, conflicts possible |
+| **Port Management** | OS-selected loopback port with project discovery | Fixed port, conflicts possible |
 
 ## License
 

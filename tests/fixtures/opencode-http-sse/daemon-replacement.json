@@ -1,0 +1,34 @@
+{
+  "fixture": "managed-daemon-replacement",
+  "health_endpoint": "global.godot.health",
+  "old": {
+    "schema": "opencode-godot-listen",
+    "schema_version": 1,
+    "hostname": "127.0.0.1",
+    "port": 43123,
+    "pid": 4242,
+    "process_start": "old-process-start",
+    "project_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "launch_nonce": "old-launch-nonce",
+    "opencode_version": "1.17.18",
+    "build_fingerprint": "f47684787ad07e5311bd9422c1a9eb70c9966274"
+  },
+  "replacement": {
+    "schema": "opencode-godot-listen",
+    "schema_version": 1,
+    "hostname": "127.0.0.1",
+    "port": 43124,
+    "pid": 5252,
+    "process_start": "new-process-start",
+    "project_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "launch_nonce": "new-launch-nonce",
+    "opencode_version": "1.17.18",
+    "build_fingerprint": "f47684787ad07e5311bd9422c1a9eb70c9966274"
+  },
+  "expected": {
+    "close_old_stream": true,
+    "mark_active_request": "interrupted",
+    "must_not_attach_old_request_to_replacement": true,
+    "fresh_health_and_directory_probe_required": true
+  }
+}

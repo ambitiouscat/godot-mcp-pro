@@ -1,0 +1,238 @@
+{
+    "schema":  "opencode-godot-payload-manifest",
+    "schema_version":  1,
+    "godot_minimum":  "4.3",
+    "release":  {
+                    "mode":  "partial",
+                    "complete":  false,
+                    "signature_required":  true
+                },
+    "opencode":  {
+                     "version":  "1.17.18",
+                     "source_fingerprint":  "sha256:5a6e806d93771ee150ddb57361a8b9f43a9637ce9de9f77777d16b01ff47c0b6",
+                     "git_commit":  "f47684787ad07e5311bd9422c1a9eb70c9966274"
+                 },
+    "godot_mcp":  {
+                      "version":  "1.16.0",
+                      "api_contract":  "godot-mcp-pro/1.16.0",
+                      "source_fingerprint":  "sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c"
+                  },
+    "payloads":  {
+                     "windows-x86_64":  {
+                                            "opencode":  {
+                                                             "path":  "bin/windows-x86_64/opencode.exe",
+                                                             "sha256":  "sha256:32801b45afe8d03482425a05f43145e36aace2165c550efe376f2e9c00ab3096",
+                                                             "size_bytes":  184919552,
+                                                             "mode":  "0755",
+                                                             "signature":  {
+                                                                               "status":  "unverified",
+                                                                               "scheme":  "none",
+                                                                               "required_from_release_environment":  true
+                                                                           },
+                                                             "version":  "1.17.18",
+                                                             "artifact_version":  "1.17.18",
+                                                             "version_verified":  true,
+                                                             "source_fingerprint":  "sha256:5a6e806d93771ee150ddb57361a8b9f43a9637ce9de9f77777d16b01ff47c0b6",
+                                                             "build_fingerprint":  "b5d3a0b7b00582125a905cb3373671ae3db39e5606427ac4114bd6a3d36f70e5",
+                                                             "status":  "unverified"
+                                                         },
+                                            "mcp":  {
+                                                        "path":  "bin/windows-x86_64/godot-mcp.exe",
+                                                        "sha256":  "sha256:8bcd775753a2ae85ae15504e74d278fd2791907e72cd18d0e2ef8d27ec6e872c",
+                                                        "size_bytes":  99013120,
+                                                        "mode":  "0755",
+                                                        "signature":  {
+                                                                          "required_from_release_environment":  true,
+                                                                          "scheme":  "none",
+                                                                          "status":  "unsigned"
+                                                                      },
+                                                        "version":  "1.16.0",
+                                                        "artifact_version":  "1.16.0",
+                                                        "version_verified":  true,
+                                                        "source_fingerprint":  "sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                        "build_fingerprint":  "bun-1.3.14:bun-windows-x64-baseline:sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                        "status":  "unverified"
+                                                    }
+                                        },
+                     "windows-arm64":  {
+                                           "opencode":  {
+                                                            "path":  "bin/windows-arm64/opencode.exe",
+                                                            "sha256":  "sha256:9a1b149f712d2c2e2be1de056bb90eb7cdf500ae1a5c83deeaa15f8fe8790e25",
+                                                            "size_bytes":  180094976,
+                                                            "mode":  "0755",
+                                                            "signature":  {
+                                                                              "status":  "unverified",
+                                                                              "scheme":  "none",
+                                                                              "required_from_release_environment":  true
+                                                                          },
+                                                            "version":  "1.17.18",
+                                                            "artifact_version":  "1.17.18",
+                                                            "version_verified":  true,
+                                                            "source_fingerprint":  "sha256:5a6e806d93771ee150ddb57361a8b9f43a9637ce9de9f77777d16b01ff47c0b6",
+                                                            "build_fingerprint":  "33ab710a6bc0cde72e0e7a7381211f046178247646cc01d12c6eaf873db2b33e",
+                                                            "status":  "unverified"
+                                                        },
+                                           "mcp":  {
+                                                       "path":  "bin/windows-arm64/godot-mcp.exe",
+                                                       "sha256":  "sha256:2e726aa29b96e18d2d0921501f05d00bbaaf13b809b359b2ffa2ef19059cfd07",
+                                                       "size_bytes":  95839744,
+                                                       "mode":  "0755",
+                                                       "signature":  {
+                                                                         "required_from_release_environment":  true,
+                                                                         "scheme":  "none",
+                                                                         "status":  "unsigned"
+                                                                     },
+                                                       "version":  "1.16.0",
+                                                       "artifact_version":  "1.16.0",
+                                                       "version_verified":  true,
+                                                       "source_fingerprint":  "sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                       "build_fingerprint":  "bun-1.3.14:bun-windows-arm64:sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                       "status":  "unverified"
+                                                   }
+                                       },
+                     "macos-x86_64":  {
+                                          "opencode":  {
+                                                           "path":  "bin/macos-x86_64/opencode",
+                                                           "sha256":  "sha256:d88581e91582c0f6f73eece51538ce6ab5d7d614356a4c0c00019aca7264bbf6",
+                                                           "size_bytes":  154173520,
+                                                           "mode":  "0755",
+                                                           "signature":  {
+                                                                             "status":  "unverified",
+                                                                             "scheme":  "none",
+                                                                             "required_from_release_environment":  true
+                                                                         },
+                                                           "version":  "1.17.18",
+                                                           "artifact_version":  "1.17.18",
+                                                           "version_verified":  true,
+                                                           "source_fingerprint":  "sha256:5a6e806d93771ee150ddb57361a8b9f43a9637ce9de9f77777d16b01ff47c0b6",
+                                                           "build_fingerprint":  "d3e12c4f7262cd80f0fa58e12f5d9879a477c08d94ba11d80805f1f239914845",
+                                                           "status":  "unverified"
+                                                       },
+                                          "mcp":  {
+                                                      "path":  "bin/macos-x86_64/godot-mcp",
+                                                      "sha256":  "sha256:a6559530b8f5eae497c24eaaa198fc5a8e2689d823483a7858aee1e4d40b7474",
+                                                      "size_bytes":  70434896,
+                                                      "mode":  "0755",
+                                                      "signature":  {
+                                                                        "required_from_release_environment":  true,
+                                                                        "scheme":  "none",
+                                                                        "status":  "unsigned"
+                                                                    },
+                                                      "version":  "1.16.0",
+                                                      "artifact_version":  "1.16.0",
+                                                      "version_verified":  true,
+                                                      "source_fingerprint":  "sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                      "build_fingerprint":  "bun-1.3.14:bun-darwin-x64-baseline:sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                      "status":  "unverified"
+                                                  }
+                                      },
+                     "macos-arm64":  {
+                                         "opencode":  {
+                                                          "path":  "bin/macos-arm64/opencode",
+                                                          "sha256":  "sha256:453afb70fee0c84e8c03a97d43de9ff81225db8b556a1cc093fb5a2fd4fd90ff",
+                                                          "size_bytes":  148714082,
+                                                          "mode":  "0755",
+                                                          "signature":  {
+                                                                            "status":  "unverified",
+                                                                            "scheme":  "none",
+                                                                            "required_from_release_environment":  true
+                                                                        },
+                                                          "version":  "1.17.18",
+                                                          "artifact_version":  "1.17.18",
+                                                          "version_verified":  true,
+                                                          "source_fingerprint":  "sha256:5a6e806d93771ee150ddb57361a8b9f43a9637ce9de9f77777d16b01ff47c0b6",
+                                                          "build_fingerprint":  "01cb83dd1e9c281c07db229d6cf1586b7dc89b7f76acd724795dcbd16a142009",
+                                                          "status":  "unverified"
+                                                      },
+                                         "mcp":  {
+                                                     "path":  "bin/macos-arm64/godot-mcp",
+                                                     "sha256":  "sha256:43406830a48b96005fb6785f778ee4700b93d4f62de9556d5f6664f053267e12",
+                                                     "size_bytes":  64717538,
+                                                     "mode":  "0755",
+                                                     "signature":  {
+                                                                       "required_from_release_environment":  true,
+                                                                       "scheme":  "none",
+                                                                       "status":  "unsigned"
+                                                                   },
+                                                     "version":  "1.16.0",
+                                                     "artifact_version":  "1.16.0",
+                                                     "version_verified":  true,
+                                                     "source_fingerprint":  "sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                     "build_fingerprint":  "bun-1.3.14:bun-darwin-arm64:sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                     "status":  "unverified"
+                                                 }
+                                     },
+                     "linux-x86_64-glibc":  {
+                                                "opencode":  {
+                                                                 "path":  "bin/linux-x86_64-glibc/opencode",
+                                                                 "sha256":  "sha256:a88e0112b96b6c578ec3f2da0e91e17d5d3a74d919c47071064951ad8fd52340",
+                                                                 "size_bytes":  189143168,
+                                                                 "mode":  "0755",
+                                                                 "signature":  {
+                                                                                   "status":  "unverified",
+                                                                                   "scheme":  "none",
+                                                                                   "required_from_release_environment":  true
+                                                                               },
+                                                                 "version":  "1.17.18",
+                                                                 "artifact_version":  "1.17.18",
+                                                                 "version_verified":  true,
+                                                                 "source_fingerprint":  "sha256:5a6e806d93771ee150ddb57361a8b9f43a9637ce9de9f77777d16b01ff47c0b6",
+                                                                 "build_fingerprint":  "a95d86e4774f5389570ea57c2c3e8854d281604413a172f0b6d346de9c8e0df1",
+                                                                 "status":  "unverified"
+                                                             },
+                                                "mcp":  {
+                                                            "path":  "bin/linux-x86_64-glibc/godot-mcp",
+                                                            "sha256":  "sha256:c6fcaebca7a00542d34a5a53d486c3e8693690ced7d6b1ada783afde7812a730",
+                                                            "size_bytes":  94894208,
+                                                            "mode":  "0755",
+                                                            "signature":  {
+                                                                              "required_from_release_environment":  true,
+                                                                              "scheme":  "none",
+                                                                              "status":  "unsigned"
+                                                                          },
+                                                            "version":  "1.16.0",
+                                                            "artifact_version":  "1.16.0",
+                                                            "version_verified":  true,
+                                                            "source_fingerprint":  "sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                            "build_fingerprint":  "bun-1.3.14:bun-linux-x64-baseline:sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                            "status":  "unverified"
+                                                        }
+                                            },
+                     "linux-arm64-glibc":  {
+                                               "opencode":  {
+                                                                "path":  "bin/linux-arm64-glibc/opencode",
+                                                                "sha256":  "sha256:46dfa2fa507768a0f0b59ab3ae50924a864a6e426b7059675b73421aad0ffdec",
+                                                                "size_bytes":  188655760,
+                                                                "mode":  "0755",
+                                                                "signature":  {
+                                                                                  "status":  "unverified",
+                                                                                  "scheme":  "none",
+                                                                                  "required_from_release_environment":  true
+                                                                              },
+                                                                "version":  "1.17.18",
+                                                                "artifact_version":  "1.17.18",
+                                                                "version_verified":  true,
+                                                                "source_fingerprint":  "sha256:5a6e806d93771ee150ddb57361a8b9f43a9637ce9de9f77777d16b01ff47c0b6",
+                                                                "build_fingerprint":  "73ea9933b69f5647f274225ebd59d76ca49aa7f0cc4492651bbc8d9b7a4792c2",
+                                                                "status":  "unverified"
+                                                            },
+                                               "mcp":  {
+                                                           "path":  "bin/linux-arm64-glibc/godot-mcp",
+                                                           "sha256":  "sha256:a1d49c72dbd73ddc21ec208d4ba15d803d496ad509b925c1da6fb692bf2fa905",
+                                                           "size_bytes":  94939280,
+                                                           "mode":  "0755",
+                                                           "signature":  {
+                                                                             "required_from_release_environment":  true,
+                                                                             "scheme":  "none",
+                                                                             "status":  "unsigned"
+                                                                         },
+                                                           "version":  "1.16.0",
+                                                           "artifact_version":  "1.16.0",
+                                                           "version_verified":  true,
+                                                           "source_fingerprint":  "sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                           "build_fingerprint":  "bun-1.3.14:bun-linux-arm64:sha256:b7e757b31c555c2146a55485a15e36f73999700bbdcea93451a872b7518fd02c",
+                                                           "status":  "unverified"
+                                                       }
+                                           }
+                 }
+}

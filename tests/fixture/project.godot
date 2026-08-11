@@ -1,0 +1,16 @@
+; Minimal isolated project used by tests/run_bridge_tests.ps1.
+config_version=5
+
+[application]
+
+config/name="Godot MCP Bridge Test"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+

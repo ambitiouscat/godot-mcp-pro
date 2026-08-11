@@ -1,0 +1,162 @@
+{
+  "fixture": "opencode-http-contract-examples",
+  "contract": "addons/opencode_godot/contract/opencode-http-contract.json",
+  "base_url": "http://127.0.0.1:43123",
+  "directory": "C:/workspace/godot-demo",
+  "headers": {
+    "authorization": "Basic b3BlbmNvZGU6Zml4dHVyZS1wYXNzd29yZA==",
+    "x-opencode-directory": "C:/workspace/godot-demo",
+    "content-type": "application/json"
+  },
+  "session": {
+    "id": "ses_demo",
+    "projectID": "global",
+    "agent": "build",
+    "model": { "id": "gpt-5", "providerID": "openai" },
+    "cost": 0,
+    "tokens": { "input": 0, "output": 0, "reasoning": 0, "cache": { "read": 0, "write": 0 } },
+    "time": { "created": 1710000000000, "updated": 1710000000000 },
+    "title": "Godot contract fixture",
+    "location": { "directory": "C:/workspace/godot-demo" }
+  },
+  "requests": [
+    {
+      "endpoint": "instance.path",
+      "method": "GET",
+      "path": "/path",
+      "response": {
+        "status": 200,
+        "json": {
+          "home": "C:/Users/fixture",
+          "state": "C:/Users/fixture/AppData/Local/opencode",
+          "config": "C:/Users/fixture/AppData/Roaming/opencode",
+          "worktree": "/",
+          "directory": "C:/workspace/godot-demo"
+        }
+      }
+    },
+    {
+      "endpoint": "v2.session.list",
+      "method": "GET",
+      "path": "/api/session?limit=50&order=desc",
+      "response": { "status": 200, "json": { "data": [], "cursor": {} } }
+    },
+    {
+      "endpoint": "v2.session.create",
+      "method": "POST",
+      "path": "/api/session",
+      "body": { "location": { "directory": "C:/workspace/godot-demo" } },
+      "response": { "status": 200, "json": { "data": "$.session" } }
+    },
+    {
+      "endpoint": "v2.session.prompt",
+      "method": "POST",
+      "path": "/api/session/ses_demo/prompt",
+      "body": { "id": "msg_prompt", "prompt": { "text": "Inspect the current Godot scene." }, "delivery": "steer", "resume": true },
+      "response": {
+        "status": 200,
+        "json": {
+          "data": { "admittedSeq": 1, "id": "msg_prompt", "sessionID": "ses_demo", "prompt": { "text": "Inspect the current Godot scene." }, "delivery": "steer", "timeCreated": 1710000000000 }
+        }
+      }
+    },
+    {
+      "endpoint": "v2.session.history",
+      "method": "GET",
+      "path": "/api/session/ses_demo/history?after=0&limit=100",
+      "response": { "status": 200, "json": { "data": [], "hasMore": false } }
+    },
+    {
+      "endpoint": "v2.session.events",
+      "method": "GET",
+      "path": "/api/session/ses_demo/event?after=1",
+      "accept": "text/event-stream",
+      "response": { "status": 200, "content_type": "text/event-stream" }
+    },
+    {
+      "endpoint": "v2.session.interrupt",
+      "method": "POST",
+      "path": "/api/session/ses_demo/interrupt",
+      "response": { "status": 204, "body": "" }
+    },
+    {
+      "endpoint": "v2.session.permission.list",
+      "method": "GET",
+      "path": "/api/session/ses_demo/permission",
+      "response": {
+        "status": 200,
+        "json": {
+          "data": [
+            { "id": "per_demo", "sessionID": "ses_demo", "action": "edit", "resources": ["res://player.gd"], "save": ["once"], "metadata": { "reason": "fixture" }, "source": { "type": "tool", "messageID": "msg_assistant", "callID": "call_1" } }
+          ]
+        }
+      }
+    },
+    {
+      "endpoint": "v2.session.permission.reply",
+      "method": "POST",
+      "path": "/api/session/ses_demo/permission/per_demo/reply",
+      "body_variants": [
+        { "reply": "once" },
+        { "reply": "always", "message": "Allow edits for this session." },
+        { "reply": "reject", "message": "Not approved." }
+      ],
+      "response": { "status": 204, "body": "" }
+    },
+    {
+      "endpoint": "v2.session.question.list",
+      "method": "GET",
+      "path": "/api/session/ses_demo/question",
+      "response": {
+        "status": 200,
+        "json": {
+          "data": [
+            { "id": "que_demo", "sessionID": "ses_demo", "questions": [
+              { "question": "Which target should be inspected?", "header": "Target", "options": [
+                { "label": "Editor", "description": "Inspect the editor scene." },
+                { "label": "Runtime", "description": "Inspect the running game." }
+              ], "multiple": false, "custom": false },
+              { "question": "Which detail level?", "header": "Detail", "options": [
+                { "label": "Summary", "description": "Return a short summary." },
+                { "label": "Full", "description": "Return all observed details." }
+              ], "multiple": false, "custom": true }
+            ], "tool": { "messageID": "msg_assistant", "callID": "call_2" } }
+          ]
+        }
+      }
+    },
+    {
+      "endpoint": "v2.session.question.reply",
+      "method": "POST",
+      "path": "/api/session/ses_demo/question/que_demo/reply",
+      "body": { "answers": [["Editor"], ["Full"]] },
+      "response": { "status": 204, "body": "" }
+    },
+    {
+      "endpoint": "v2.session.question.reject",
+      "method": "POST",
+      "path": "/api/session/ses_demo/question/que_demo/reject",
+      "response": { "status": 204, "body": "" }
+    },
+    {
+      "endpoint": "global.godot.health",
+      "method": "GET",
+      "path": "/global/godot-health",
+      "response": {
+        "status": 200,
+        "json": {
+          "schema": "opencode-godot-listen",
+          "schema_version": 1,
+          "hostname": "127.0.0.1",
+          "port": 43123,
+          "pid": 4242,
+          "process_start": "proc-start-fixture",
+          "project_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "launch_nonce": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "opencode_version": "1.17.18",
+          "build_fingerprint": "f47684787ad07e5311bd9422c1a9eb70c9966274"
+        }
+      }
+    }
+  ]
+}

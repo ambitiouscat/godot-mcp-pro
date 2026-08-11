@@ -1,414 +1,510 @@
 @tool
 extends Node
 
-## Multi-connection WebSocket client.
-## Connects to multiple Node.js MCP server instances on ports 6505-6514.
-## Each Claude Code session gets its own port; Godot talks to all of them.
-## Ports 6505-6509: MCP servers (stdio), 6510-6514: CLI tool connections.
+## Discovery-driven WebSocket client for one authenticated agent session.
+## The historical filename is kept so existing addon references do not break.
 
 signal client_connected()
 signal client_disconnected()
 signal message_received(text: String)
 signal command_executed(method: String, success: bool)
 signal command_completed(method: String, success: bool, response: String, source_port: int)
+signal state_changed(state: String, detail: String)
+
+const Protocol := preload("res://addons/godot_mcp/bridge_protocol_v1.gd")
+
+const BUFFER_SIZE := 16 * 1024 * 1024
+const INITIAL_RETRY_SECONDS := 0.25
+const MAX_RETRY_SECONDS := 5.0
+const STABLE_READY_RESET_SECONDS := 30.0
+const PING_INTERVAL_SECONDS := 5.0
+const INACTIVITY_TIMEOUT_SECONDS := 30.0
+
+enum BridgeState {
+	STOPPED,
+	DISCOVERING,
+	CONNECTING,
+	HANDSHAKING,
+	READY,
+	CLOSING,
+	BACKOFF,
+}
 
 var command_router: Node
+var session_coordinator: RefCounted
 
-const BASE_PORT := 6505
-const MAX_PORT := 6514
-const RECONNECT_INTERVAL := 3.0
-const BUFFER_SIZE := 16 * 1024 * 1024  # 16MB
-const PING_INTERVAL := 5.0  # send ping every N seconds while connected
-const INACTIVITY_TIMEOUT := 30.0  # force-close if no message received for N seconds
-const HANDSHAKE_TIMEOUT := 10.0  # give up on a socket stuck CONNECTING/CLOSING
-## Optional, opt-in. See SECURITY.md — this defends against other users on a
-## shared machine and against cross-project mix-ups, NOT against a process
-## running as you, which can read the token file just as a real server does.
-const TOKEN_PATH := "user://mcp_auth_token"
-const TOKEN_SETTING := "godot_mcp_pro/require_connection_token"
-const AUTH_TIMEOUT := 5.0  # close a peer that has not authenticated in time
-
-# Per-port connection state
-var _peers: Dictionary = {}  # port -> WebSocketPeer
-var _connected: Dictionary = {}  # port -> bool
-var _timers: Dictionary = {}  # port -> float (reconnect countdown)
-var _connect_times: Dictionary = {}  # port -> float (elapsed seconds since connect)
-var _last_activity: Dictionary = {}  # port -> float (seconds since last received message)
-var _ping_timers: Dictionary = {}  # port -> float (seconds since last sent ping)
-var _stale_ports: Dictionary = {}  # port -> bool (heartbeat timeout flag, exposed to UI)
-var _handshake_timers: Dictionary = {}  # port -> float (seconds stuck CONNECTING/CLOSING)
-var _authed: Dictionary = {}  # port -> bool (token accepted, or auth not required)
-var _auth_timers: Dictionary = {}  # port -> float (seconds awaiting auth)
-var _auth_token: String = ""  # empty when the token requirement is off
-var _running: bool = false
+var _peer: WebSocketPeer
+var _state := BridgeState.STOPPED
+var _state_detail := "Stopped"
+var _running := false
+var _generation := 0
+var _endpoint := ""
+var _endpoint_port := 0
+var _handshake_stage := ""
+var _handshake_request_id := ""
+var _authenticate_request_id := ""
+var _client_nonce := ""
+var _server_nonce := ""
+var _handshake_elapsed := 0.0
+var _ready_elapsed := 0.0
+var _idle_elapsed := 0.0
+var _ping_elapsed := 0.0
+var _retry_delay := INITIAL_RETRY_SECONDS
+var _retry_remaining := 0.0
+var _was_ready := false
+var _last_close_code := 0
 
 
-func start_server() -> void:
+func start_server(coordinator: RefCounted = null) -> void:
+	if coordinator != null:
+		session_coordinator = coordinator
+	if session_coordinator == null or not session_coordinator.has_method("read_valid_discovery"):
+		push_error("[MCP] Cannot start bridge client without a session coordinator")
+		_transition(BridgeState.STOPPED, "Session coordinator unavailable")
+		return
 	_running = true
-	_auth_token = _prepare_auth_token()
-	for p in range(BASE_PORT, MAX_PORT + 1):
-		_connected[p] = false
-		_timers[p] = 0.0
-		_try_connect(p)
-	print("[MCP] Connecting to ports %d-%d" % [BASE_PORT, MAX_PORT])
+	_retry_delay = INITIAL_RETRY_SECONDS
+	_retry_remaining = 0.0
+	_transition(BridgeState.DISCOVERING, "Waiting for agent discovery")
+	print("[MCP] Waiting for a project-scoped authenticated bridge endpoint")
 
 
 func stop_server() -> void:
+	if not _running and _state == BridgeState.STOPPED:
+		return
 	_running = false
-	for p in _peers:
-		var ws: WebSocketPeer = _peers[p]
-		if ws:
-			ws.close(1000, "Plugin shutting down")
-	_peers.clear()
-	_connected.clear()
-	_timers.clear()
-	_connect_times.clear()
-	_last_activity.clear()
-	_ping_timers.clear()
-	_stale_ports.clear()
-	_handshake_timers.clear()
-	_authed.clear()
-	_auth_timers.clear()
+	_generation += 1
+	var notify_disconnect := _state == BridgeState.READY
+	if _peer != null:
+		_peer.close(1000, "Plugin shutting down")
+		_peer.poll()
+	_peer = null
+	_clear_connection_state()
+	_transition(BridgeState.STOPPED, "Plugin stopped")
+	if notify_disconnect:
+		client_disconnected.emit()
 	print("[MCP] WebSocket client stopped")
 
 
 func get_client_count() -> int:
-	var count: int = 0
-	for p in _connected:
-		if _connected[p]:
-			count += 1
-	return count
+	return 1 if _state == BridgeState.READY else 0
 
 
 func get_connected_ports() -> Array[int]:
 	var ports: Array[int] = []
-	for p: int in _connected:
-		if _connected[p]:
-			ports.append(p)
+	if _state == BridgeState.READY and _endpoint_port > 0:
+		ports.append(_endpoint_port)
 	return ports
 
 
 func get_port_connect_time(port: int) -> float:
-	return _connect_times.get(port, -1.0)
+	return _ready_elapsed if port == _endpoint_port and _state == BridgeState.READY else -1.0
 
 
 func get_port_idle_time(port: int) -> float:
-	return _last_activity.get(port, -1.0)
+	return _idle_elapsed if port == _endpoint_port and _state == BridgeState.READY else -1.0
 
 
 func is_port_stale(port: int) -> bool:
-	return _stale_ports.get(port, false)
+	return port == _endpoint_port and _state == BridgeState.BACKOFF and _was_ready
 
 
-func _try_connect(p: int) -> void:
-	var ws := WebSocketPeer.new()
-	ws.outbound_buffer_size = BUFFER_SIZE
-	ws.inbound_buffer_size = BUFFER_SIZE
-	var err := ws.connect_to_url("ws://127.0.0.1:%d" % p)
-	if err == OK:
-		_peers[p] = ws
-	else:
-		_peers[p] = null
+func get_state_name() -> String:
+	return String(BridgeState.keys()[_state])
+
+
+func get_state_detail() -> String:
+	return _state_detail
+
+
+func get_endpoint() -> String:
+	return _endpoint
+
+
+func get_retry_seconds() -> float:
+	return maxf(_retry_remaining, 0.0)
+
+
+func get_session_generation() -> int:
+	return _generation
+
+
+func is_session_ready(generation: int = -1) -> bool:
+	if generation >= 0 and generation != _generation:
+		return false
+	return _running and _state == BridgeState.READY and _peer != null and _peer.get_ready_state() == WebSocketPeer.STATE_OPEN
+
+
+func send_message(text: String) -> void:
+	if not is_session_ready():
+		return
+	var error := _peer.send_text(text)
+	if error != OK:
+		push_error("[MCP] Failed to send bridge message: %s" % error_string(error))
 
 
 func _process(delta: float) -> void:
 	if not _running:
 		return
+	if _peer == null:
+		_retry_remaining -= delta
+		if _retry_remaining <= 0.0:
+			_try_connect_from_discovery()
+		return
 
-	for p in range(BASE_PORT, MAX_PORT + 1):
-		var ws: WebSocketPeer = _peers.get(p)
-
-		# No peer - try reconnect on timer
-		if ws == null:
-			_timers[p] = _timers.get(p, 0.0) + delta
-			if _timers[p] >= RECONNECT_INTERVAL:
-				_timers[p] = 0.0
-				_try_connect(p)
-			continue
-
-		ws.poll()
-		var state := ws.get_ready_state()
-
-		match state:
-			WebSocketPeer.STATE_OPEN:
-				_handshake_timers[p] = 0.0
-				if not _connected.get(p, false):
-					_connected[p] = true
-					_connect_times[p] = 0.0
-					_last_activity[p] = 0.0
-					_ping_timers[p] = 0.0
-					_stale_ports[p] = false
-					_timers[p] = 0.0
-					# With no token required this is true immediately, so the
-					# whole mechanism is inert for existing setups.
-					_authed[p] = _auth_token.is_empty()
-					_auth_timers[p] = 0.0
-					if not _authed[p]:
-						ws.send_text(JSON.stringify({
-							"jsonrpc": "2.0",
-							"method": "auth_required",
-							"params": {"scheme": "shared-token"},
-						}))
-					print_verbose("[MCP] Connected on port %d" % p)
-					client_connected.emit()
-				else:
-					_connect_times[p] = _connect_times.get(p, 0.0) + delta
-					_last_activity[p] = _last_activity.get(p, 0.0) + delta
-					_ping_timers[p] = _ping_timers.get(p, 0.0) + delta
-
-				var received_any := false
-				while ws.get_available_packet_count() > 0:
-					var packet := ws.get_packet()
-					var text := packet.get_string_from_utf8()
-					received_any = true
-					_dispatch_message(text, p)
-
-				if received_any:
-					_last_activity[p] = 0.0
-					if _stale_ports.get(p, false):
-						_stale_ports[p] = false
-						print("[MCP] Port %d recovered from stale state" % p)
-
-				# Force-close if no message received for INACTIVITY_TIMEOUT.
-				# The MCP server pings every 10s, so 30s of silence means the
-				# connection is half-open and reconnect is the only way out.
-				if _last_activity.get(p, 0.0) > INACTIVITY_TIMEOUT:
-					push_warning("[MCP] Port %d silent for %.1fs — forcing reconnect" % [p, _last_activity[p]])
-					_stale_ports[p] = true
-					ws.close(4000, "Heartbeat timeout")
-					_connected[p] = false
-					_peers[p] = null
-					_timers[p] = 0.0
-					client_disconnected.emit()
-					continue
-
-				if not _authed.get(p, true):
-					_auth_timers[p] = _auth_timers.get(p, 0.0) + delta
-					if _auth_timers[p] >= AUTH_TIMEOUT:
-						push_warning("[MCP] Port %d did not authenticate within %.0fs — closing" % [p, AUTH_TIMEOUT])
-						ws.close(4001, "Authentication required")
-						_connected[p] = false
-						_peers[p] = null
-						_timers[p] = 0.0
-						client_disconnected.emit()
-						continue
-
-				# Send periodic ping so the server can detect our death too,
-				# and so any reply resets our own inactivity timer.
-				if _ping_timers.get(p, 0.0) >= PING_INTERVAL:
-					_ping_timers[p] = 0.0
-					ws.send_text(JSON.stringify({"jsonrpc": "2.0", "method": "ping", "params": {}}))
-
-			WebSocketPeer.STATE_CLOSING, WebSocketPeer.STATE_CONNECTING:
-				# Neither state resolves on its own if the far end went away
-				# mid-handshake or mid-close. Without a deadline the port sits
-				# in limbo for the rest of the session and never reconnects.
-				_handshake_timers[p] = _handshake_timers.get(p, 0.0) + delta
-				if _handshake_timers[p] >= HANDSHAKE_TIMEOUT:
-					_handshake_timers[p] = 0.0
-					# Most ports in the range simply have no server on them, so
-					# this is the normal steady state — log it only at verbose
-					# level rather than filling the Output panel every 10s.
-					print_verbose("[MCP] Port %d stuck in %s for %.0fs — dropping the peer" % [
-						p, "CLOSING" if state == WebSocketPeer.STATE_CLOSING else "CONNECTING", HANDSHAKE_TIMEOUT
-					])
-					_connected[p] = false
-					_peers[p] = null
-					_timers[p] = 0.0
-
-			WebSocketPeer.STATE_CLOSED:
-				if _connected.get(p, false):
-					_connected[p] = false
-					print_verbose("[MCP] Disconnected from port %d" % p)
-					client_disconnected.emit()
-				_peers[p] = null
-				_timers[p] = 0.0
-				_last_activity[p] = 0.0
-				_ping_timers[p] = 0.0
-				_handshake_timers[p] = 0.0
+	_peer.poll()
+	var socket_state := _peer.get_ready_state()
+	match socket_state:
+		WebSocketPeer.STATE_CONNECTING:
+			_handshake_elapsed += delta
+			if _handshake_elapsed >= Protocol.HANDSHAKE_TIMEOUT_SECONDS:
+				_fail_connection("WebSocket connection timed out", Protocol.CLOSE_PROTOCOL_ERROR)
+		WebSocketPeer.STATE_OPEN:
+			if _state == BridgeState.CONNECTING:
+				_begin_handshake()
+			if _state != BridgeState.CLOSING:
+				_drain_packets()
+			if _state == BridgeState.HANDSHAKING:
+				_handshake_elapsed += delta
+				if _handshake_elapsed >= Protocol.HANDSHAKE_TIMEOUT_SECONDS:
+					_handle_handshake_timeout()
+			elif _state == BridgeState.READY:
+				_tick_ready(delta)
+			elif _state == BridgeState.CLOSING:
+				_handshake_elapsed += delta
+				if _handshake_elapsed >= Protocol.HANDSHAKE_TIMEOUT_SECONDS:
+					_schedule_reconnect("Socket close timed out")
+		WebSocketPeer.STATE_CLOSING:
+			_handshake_elapsed += delta
+			if _handshake_elapsed >= Protocol.HANDSHAKE_TIMEOUT_SECONDS:
+				_schedule_reconnect("Socket close timed out")
+		WebSocketPeer.STATE_CLOSED:
+			_schedule_reconnect("Agent connection closed")
 
 
-## params may legitimately be absent on the auth message.
-func params_or_empty(msg_dict: Dictionary) -> Dictionary:
-	var raw: Variant = msg_dict.get("params", {})
-	return raw if raw is Dictionary else {}
+func _handle_handshake_timeout() -> void:
+	_send_error(null, Protocol.ERROR_HANDSHAKE_TIMEOUT, "bridge_handshake_timeout")
+	_fail_connection("Authenticated handshake timed out", Protocol.CLOSE_POLICY_VIOLATION)
 
 
-## Returns the token to require, or "" when the requirement is off (the
-## default). Enabling it is opt-in via project setting or environment variable,
-## so no existing client configuration changes behaviour.
-func _prepare_auth_token() -> String:
-	var required := false
-	if ProjectSettings.has_setting(TOKEN_SETTING):
-		required = bool(ProjectSettings.get_setting(TOKEN_SETTING))
-	if OS.has_environment("GODOT_MCP_REQUIRE_TOKEN"):
-		var env := OS.get_environment("GODOT_MCP_REQUIRE_TOKEN").strip_edges().to_lower()
-		required = env != "" and env != "0" and env != "false"
-	if not required:
-		# Do not leave a stale token behind to confuse a later session.
-		if FileAccess.file_exists(TOKEN_PATH):
-			DirAccess.remove_absolute(ProjectSettings.globalize_path(TOKEN_PATH))
-		return ""
-
-	var token := _random_token()
-	var file := FileAccess.open(TOKEN_PATH, FileAccess.WRITE)
-	if file == null:
-		push_error("[MCP] Connection token required but %s could not be written; refusing every connection." % TOKEN_PATH)
-		return token
-	file.store_string(token)
-	file.close()
-	print("[MCP] Connection token required. Servers must read %s (see SECURITY.md)." % ProjectSettings.globalize_path(TOKEN_PATH))
-	return token
+func _try_connect_from_discovery() -> void:
+	_transition(BridgeState.DISCOVERING, "Reading project discovery")
+	var result: Dictionary = session_coordinator.read_valid_discovery()
+	if not result.get("ok", false):
+		_schedule_reconnect(result.get("error", "Waiting for agent discovery"))
+		return
+	var record: Dictionary = result["record"]
+	_endpoint = record["endpoint"]
+	_endpoint_port = int(_endpoint.get_slice(":", 2))
+	_peer = WebSocketPeer.new()
+	_peer.outbound_buffer_size = BUFFER_SIZE
+	_peer.inbound_buffer_size = BUFFER_SIZE
+	var connect_error := _peer.connect_to_url(_endpoint)
+	if connect_error != OK:
+		_peer = null
+		_schedule_reconnect("Could not connect to discovered endpoint: %s" % error_string(connect_error))
+		return
+	_generation += 1
+	_handshake_elapsed = 0.0
+	_transition(BridgeState.CONNECTING, "Connecting to %s" % _endpoint)
 
 
-func _random_token() -> String:
-	var bytes := PackedByteArray()
-	for _i in 32:
-		bytes.append(randi() % 256)
-	return Marshalls.raw_to_base64(bytes)
+func _begin_handshake() -> void:
+	_client_nonce = _fresh_client_nonce()
+	_server_nonce = ""
+	_handshake_stage = "server_proof"
+	_handshake_request_id = "bridge-handshake-%s" % Protocol.random_base64url(12)
+	_authenticate_request_id = ""
+	_handshake_elapsed = 0.0
+	_transition(BridgeState.HANDSHAKING, "Authenticating project bridge")
+	if not _send_json({
+		"jsonrpc": "2.0",
+		"id": _handshake_request_id,
+		"method": "bridge.handshake",
+		"params": {
+			"protocol_version": Protocol.PROTOCOL_VERSION,
+			"project_path": session_coordinator.project_path,
+			"owner_nonce": session_coordinator.owner_nonce,
+			"client_nonce": _client_nonce,
+		},
+	}):
+		_fail_connection("Could not send bridge handshake", Protocol.CLOSE_PROTOCOL_ERROR)
 
 
-func _send_to_port(p: int, text: String) -> bool:
-	var ws: WebSocketPeer = _peers.get(p)
-	if ws == null or not _connected.get(p, false):
+func _fresh_client_nonce() -> String:
+	return Protocol.random_base64url(16)
+
+
+func _drain_packets() -> void:
+	while _peer != null and _peer.get_available_packet_count() > 0:
+		var packet := _peer.get_packet()
+		if not _peer.was_string_packet():
+			_fail_connection("Binary bridge packets are not supported", Protocol.CLOSE_PROTOCOL_ERROR)
+			return
+		_idle_elapsed = 0.0
+		_handle_message(packet.get_string_from_utf8())
+
+
+func _handle_message(text: String) -> void:
+	message_received.emit(text)
+	var json := JSON.new()
+	if json.parse(text) != OK or not json.data is Dictionary:
+		_send_error(null, -32700, "Parse error")
+		if _state == BridgeState.HANDSHAKING:
+			_fail_connection("Malformed JSON during bridge authentication", Protocol.CLOSE_PROTOCOL_ERROR)
+		return
+	var message: Dictionary = json.data
+	if message.get("jsonrpc") != "2.0":
+		_send_error(message.get("id"), -32600, "jsonrpc must be '2.0'")
+		if _state == BridgeState.HANDSHAKING:
+			_fail_connection("Malformed JSON-RPC handshake response", Protocol.CLOSE_PROTOCOL_ERROR)
+		return
+	if _state == BridgeState.HANDSHAKING:
+		_handle_handshake_message(message)
+		return
+	if _state != BridgeState.READY:
+		if message.has("method"):
+			_send_error(message.get("id"), Protocol.ERROR_NOT_READY, "bridge_not_ready")
+		return
+	_handle_ready_message(message)
+
+
+func _handle_handshake_message(message: Dictionary) -> void:
+	if message.has("method"):
+		_send_error(message.get("id"), Protocol.ERROR_NOT_READY, "bridge_not_ready")
+		return
+	var response_id: Variant = message.get("id")
+	if not response_id is String:
+		_fail_connection("Handshake response id must be a string", Protocol.CLOSE_PROTOCOL_ERROR)
+		return
+	if message.has("error"):
+		var error_data: Variant = message.get("error")
+		var error_code := 0
+		if error_data is Dictionary:
+			var raw_error_code: Variant = (error_data as Dictionary).get("code")
+			if raw_error_code is int or (raw_error_code is float and floor(raw_error_code as float) == raw_error_code as float):
+				error_code = int(raw_error_code)
+		_fail_connection(
+			"Agent rejected bridge authentication",
+			Protocol.CLOSE_PROTOCOL_ERROR if error_code == Protocol.ERROR_UNSUPPORTED_PROTOCOL else Protocol.CLOSE_POLICY_VIOLATION
+		)
+		return
+	var result: Variant = message.get("result")
+	if not result is Dictionary:
+		_fail_connection("Malformed handshake response", Protocol.CLOSE_PROTOCOL_ERROR)
+		return
+	var data: Dictionary = result
+	if _handshake_stage == "server_proof" and response_id == _handshake_request_id:
+		if not data.get("server_nonce") is String or not data.get("server_proof") is String:
+			_fail_connection("Handshake proof fields must be strings", Protocol.CLOSE_PROTOCOL_ERROR)
+			return
+		_server_nonce = data["server_nonce"]
+		var supplied_proof: String = data["server_proof"]
+		if not Protocol.validate_nonce(_server_nonce, 16):
+			_fail_connection("Agent server nonce is invalid", Protocol.CLOSE_PROTOCOL_ERROR)
+			return
+		if not Protocol.validate_proof(supplied_proof):
+			_fail_connection("Agent proof encoding is invalid", Protocol.CLOSE_PROTOCOL_ERROR)
+			return
+		var expected := Protocol.hmac_proof(
+			session_coordinator.token_bytes,
+			"server",
+			session_coordinator.project_path,
+			session_coordinator.owner_nonce,
+			_client_nonce,
+			_server_nonce
+		)
+		if expected.is_empty() or not Protocol.constant_time_equal(expected, supplied_proof):
+			_fail_connection("Agent proof validation failed", Protocol.CLOSE_POLICY_VIOLATION)
+			return
+		var client_proof := Protocol.hmac_proof(
+			session_coordinator.token_bytes,
+			"client",
+			session_coordinator.project_path,
+			session_coordinator.owner_nonce,
+			_client_nonce,
+			_server_nonce
+		)
+		_authenticate_request_id = "bridge-authenticate-%s" % Protocol.random_base64url(12)
+		_handshake_stage = "client_proof"
+		if not _send_json({
+			"jsonrpc": "2.0",
+			"id": _authenticate_request_id,
+			"method": "bridge.authenticate",
+			"params": {"client_proof": client_proof},
+		}):
+			_fail_connection("Could not send client authentication proof", Protocol.CLOSE_PROTOCOL_ERROR)
+		return
+	if _handshake_stage == "client_proof" and response_id == _authenticate_request_id:
+		if data.get("authenticated") != true:
+			_fail_connection("Agent did not confirm authentication", Protocol.CLOSE_POLICY_VIOLATION)
+			return
+		_handshake_stage = ""
+		_handshake_elapsed = 0.0
+		_ready_elapsed = 0.0
+		_idle_elapsed = 0.0
+		_ping_elapsed = 0.0
+		_was_ready = true
+		_transition(BridgeState.READY, "Authenticated to %s" % _endpoint)
+		client_connected.emit()
+		print("[MCP] Authenticated bridge READY at %s" % _endpoint)
+		return
+	_fail_connection("Unexpected handshake response", Protocol.CLOSE_PROTOCOL_ERROR)
+
+
+func _handle_ready_message(message: Dictionary) -> void:
+	var raw_method: Variant = message.get("method")
+	if raw_method == null:
+		# Responses are not expected here; the editor is the command responder.
+		return
+	if not raw_method is String or (raw_method as String).is_empty():
+		_send_error(message.get("id"), -32600, "Missing or non-string method")
+		return
+	var method: String = raw_method
+	if method == "ping":
+		if message.get("id") == null:
+			_send_json({"jsonrpc": "2.0", "method": "pong", "params": {}})
+		else:
+			_send_response(message.get("id"), {"pong": true}, null)
+		return
+	if method == "pong":
+		return
+	if method.begins_with("bridge."):
+		_send_error(message.get("id"), Protocol.ERROR_NOT_READY, "bridge_handshake_already_complete")
+		return
+	var raw_params: Variant = message.get("params", {})
+	if raw_params == null:
+		raw_params = {}
+	if not raw_params is Dictionary:
+		_send_error(message.get("id"), -32602, "params must be an object")
+		return
+	var generation := _generation
+	if message.get("id") == null:
+		_execute_notification.call_deferred(generation, method, raw_params)
+	else:
+		_execute_command.call_deferred(generation, message.get("id"), method, raw_params)
+
+
+func _execute_notification(generation: int, method: String, params: Dictionary) -> void:
+	if not is_session_ready(generation) or not is_instance_valid(command_router):
+		return
+	var command_result: Dictionary = await command_router.execute(method, params, generation)
+	if not is_session_ready(generation):
+		return
+	command_executed.emit(method, not command_result.has("error"))
+
+
+func _execute_command(generation: int, id: Variant, method: String, params: Dictionary) -> void:
+	if not is_session_ready(generation):
+		return
+	if not is_instance_valid(command_router):
+		_send_error(id, -32603, "Editor command router is unavailable", generation)
+		return
+	var command_result: Dictionary = await command_router.execute(method, params, generation)
+	# Never deliver an old completion to a replacement peer/session.
+	if not is_session_ready(generation):
+		return
+	var ok := not command_result.has("error")
+	var response_text := ""
+	if ok:
+		var result_data: Variant = command_result.get("result", {})
+		_send_response(id, result_data, null, generation)
+		response_text = JSON.stringify(result_data)
+	else:
+		var error_data: Variant = command_result["error"]
+		_send_response(id, null, error_data, generation)
+		response_text = JSON.stringify(error_data)
+	command_executed.emit(method, ok)
+	command_completed.emit(method, ok, response_text, _endpoint_port)
+
+
+func _tick_ready(delta: float) -> void:
+	_ready_elapsed += delta
+	_idle_elapsed += delta
+	_ping_elapsed += delta
+	if _ready_elapsed >= STABLE_READY_RESET_SECONDS:
+		_retry_delay = INITIAL_RETRY_SECONDS
+	if _idle_elapsed >= INACTIVITY_TIMEOUT_SECONDS:
+		_fail_connection("Agent heartbeat timed out", 4000)
+		return
+	if _ping_elapsed >= PING_INTERVAL_SECONDS:
+		_ping_elapsed = 0.0
+		_send_json({"jsonrpc": "2.0", "method": "ping", "params": {}})
+
+
+func _send_error(id: Variant, code: int, message: String, generation: int = -1) -> void:
+	_send_response(id, null, {"code": code, "message": message}, generation)
+
+
+func _send_response(id: Variant, result: Variant, error: Variant, generation: int = -1) -> void:
+	if generation >= 0 and generation != _generation:
+		return
+	var response := {"jsonrpc": "2.0", "id": id}
+	if error != null:
+		response["error"] = error
+	else:
+		response["result"] = result if result != null else {}
+	_send_json(response)
+
+
+func _send_json(message: Dictionary) -> bool:
+	if _peer == null or _peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
 		return false
-	var err := ws.send_text(text)
-	if err != OK:
-		# A dropped response looks identical to a slow command from the other
-		# end, so the caller waits out its timeout with no idea why. Say it
-		# here at least.
-		push_error("[MCP] Failed to send response on port %d: %s" % [p, error_string(err)])
+	var error := _peer.send_text(JSON.stringify(message))
+	if error != OK:
+		push_error("[MCP] Failed to send bridge packet: %s" % error_string(error))
 		return false
 	return true
 
 
-func send_message(text: String) -> void:
-	# Broadcast to all connected peers
-	for p in _peers:
-		_send_to_port(p, text)
-
-
-## Synchronous dispatch - parse JSON, handle ping/pong, queue command execution
-func _dispatch_message(text: String, source_port: int) -> void:
-	message_received.emit(text)
-
-	var json := JSON.new()
-	var err := json.parse(text)
-	if err != OK:
-		_send_response(source_port, null, null, {"code": -32700, "message": "Parse error"})
+func _fail_connection(reason: String, close_code: int) -> void:
+	_last_close_code = close_code
+	var notify_disconnect := _state == BridgeState.READY
+	_generation += 1
+	_clear_connection_state()
+	if notify_disconnect:
+		client_disconnected.emit()
+	if _peer != null and _peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
+		_peer.close(close_code, reason.left(120))
+		_handshake_elapsed = 0.0
+		_transition(BridgeState.CLOSING, reason)
 		return
+	_schedule_reconnect(reason)
 
-	var msg: Variant = json.data
-	if not msg is Dictionary:
-		_send_response(source_port, null, null, {"code": -32600, "message": "Invalid request"})
+
+func _schedule_reconnect(reason: String, increase_backoff: bool = true) -> void:
+	var notify_disconnect := _state == BridgeState.READY
+	_generation += 1
+	if _peer != null:
+		_peer = null
+	_clear_connection_state()
+	if not _running:
+		_transition(BridgeState.STOPPED, reason)
 		return
-
-	var msg_dict: Dictionary = msg
-
-	var id: Variant = msg_dict.get("id")
-
-	# Type-check the method before comparing it to anything. GDScript raises on
-	# `42 == "ping"` rather than returning false, which aborted the whole
-	# dispatch — so a request with a numeric method hung the caller until its
-	# timeout instead of being told the request was malformed.
-	var raw_method: Variant = msg_dict.get("method")
-	if not (raw_method is String) or (raw_method as String).is_empty():
-		_send_response(source_port, id, null, {"code": -32600, "message": "Missing or non-string method"})
-		return
-	var method: String = raw_method
-
-	if method == "ping":
-		# A ping carrying an id is a request and needs a correlated reply, or
-		# the sender waits for a response that never comes.
-		if id == null:
-			_send_to_port(source_port, JSON.stringify({"jsonrpc": "2.0", "method": "pong", "params": {}}))
-		else:
-			_send_response(source_port, id, {"pong": true}, null)
-		return
-
-	if method == "pong":
-		return
-
-	# Token handshake. Answered before the authentication gate below, since it
-	# is how a peer gets through that gate in the first place.
-	if method == "auth":
-		var supplied := str(params_or_empty(msg_dict).get("token", ""))
-		if _auth_token.is_empty() or supplied == _auth_token:
-			_authed[source_port] = true
-			_send_response(source_port, id, {"authenticated": true}, null)
-		else:
-			push_warning("[MCP] Port %d presented a wrong token" % source_port)
-			_send_response(source_port, id, null, {"code": -32001, "message": "Invalid token"})
-		return
-
-	# Everything else waits until the peer has proven it knows the token. When
-	# no token is configured _authed is true from the moment we connect, so
-	# this costs existing setups nothing.
-	if not _authed.get(source_port, true):
-		_send_response(source_port, id, null, {
-			"code": -32001,
-			"message": "This editor requires a connection token. Send {\"method\":\"auth\",\"params\":{\"token\":...}} first; the token is in user://mcp_auth_token. See SECURITY.md.",
-		})
-		return
-
-	# Assigning a non-Dictionary straight into a typed local raises, which
-	# aborts before any response is sent and leaves the caller waiting out its
-	# full timeout for what is really a malformed request.
-	var raw_params: Variant = msg_dict.get("params", {})
-	if raw_params == null:
-		raw_params = {}
-	if not raw_params is Dictionary:
-		_send_response(source_port, id, null, {
-			"code": -32602,
-			"message": "params must be an object, got %s" % type_string(typeof(raw_params)),
-		})
-		return
-	var params: Dictionary = raw_params
-
-	# A well-formed request carrying no id is a JSON-RPC notification: execute
-	# it, but send nothing back. (Parse and invalid-request errors above still
-	# answer with id:null, as the spec requires — there the id is unknowable
-	# rather than deliberately absent.)
-	if id == null:
-		_execute_notification.call_deferred(method, params)
-		return
-
-	if not command_router:
-		_send_response(source_port, id, null, {"code": -32603, "message": "No command router"})
-		return
-
-	_execute_command.call_deferred(source_port, id, method, params)
+	var jitter := randf_range(0.8, 1.2)
+	_retry_remaining = _retry_delay * jitter
+	if increase_backoff:
+		_retry_delay = minf(_retry_delay * 2.0, MAX_RETRY_SECONDS)
+	_transition(BridgeState.BACKOFF, "%s; retrying in %.2fs" % [reason, _retry_remaining])
+	if notify_disconnect:
+		client_disconnected.emit()
 
 
-## Runs a notification: same dispatch, no response.
-func _execute_notification(method: String, params: Dictionary) -> void:
-	if not command_router:
-		return
-	var cmd_result: Dictionary = await command_router.execute(method, params)
-	var ok: bool = not cmd_result.has("error")
-	command_executed.emit(method, ok)
+func _clear_connection_state() -> void:
+	_handshake_stage = ""
+	_handshake_request_id = ""
+	_authenticate_request_id = ""
+	_client_nonce = ""
+	_server_nonce = ""
+	_handshake_elapsed = 0.0
+	_ready_elapsed = 0.0
+	_idle_elapsed = 0.0
+	_ping_elapsed = 0.0
 
 
-func _execute_command(source_port: int, id: Variant, method: String, params: Dictionary) -> void:
-	var cmd_result: Dictionary = await command_router.execute(method, params)
-	if cmd_result.has("error"):
-		var err_data: Variant = cmd_result["error"]
-		_send_response(source_port, id, null, err_data)
-		var response_text := JSON.stringify(err_data)
-		command_executed.emit(method, false)
-		command_completed.emit(method, false, response_text, source_port)
-	else:
-		var result_data: Variant = cmd_result.get("result", {})
-		_send_response(source_port, id, result_data, null)
-		var response_text := JSON.stringify(result_data)
-		command_executed.emit(method, true)
-		command_completed.emit(method, true, response_text, source_port)
-
-
-func _send_response(source_port: int, id: Variant, result: Variant, err: Variant) -> void:
-	var response: Dictionary = {"jsonrpc": "2.0", "id": id}
-	if err != null:
-		response["error"] = err
-	else:
-		response["result"] = result if result != null else {}
-	_send_to_port(source_port, JSON.stringify(response))
+func _transition(next_state: int, detail: String) -> void:
+	_state = next_state
+	_state_detail = detail
+	if OS.has_environment("GODOT_MCP_TRACE_BRIDGE") and OS.get_environment("GODOT_MCP_TRACE_BRIDGE") == "1":
+		print("[MCP TRACE] %s: %s" % [get_state_name(), detail])
+	state_changed.emit(get_state_name(), detail)

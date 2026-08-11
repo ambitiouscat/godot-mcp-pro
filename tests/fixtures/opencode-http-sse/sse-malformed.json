@@ -1,0 +1,15 @@
+{
+  "fixture": "malformed-sse",
+  "endpoint": "v2.session.events",
+  "chunks": [
+    "id: evt_bad\ndata: {not-json}\n\n",
+    "data: ok-without-json-object\n\n",
+    "data: {\"id\":\"evt_too_large\",\"data\":\"<bounded by parser>\"}"
+  ],
+  "expected": {
+    "malformed_event": "report compatibility error and keep editor responsive",
+    "oversized_event": "reject at bounded parser limit",
+    "reconnect": true,
+    "last_applied_cursor": "unchanged"
+  }
+}

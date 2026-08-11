@@ -1,0 +1,180 @@
+{
+  "schema": "opencode-godot-http-contract",
+  "schema_version": 1,
+  "source": {
+    "version": "1.17.18",
+    "git_commit": "f47684787ad07e5311bd9422c1a9eb70c9966274",
+    "source_fingerprint": "sha256:ae969f80035fc701d81137e51a291f2e45f03dac8c9bce333336541f71d38832",
+    "source_files": [
+      "packages/client/src/contract.ts",
+      "packages/client/src/generated/client.ts",
+      "packages/client/src/generated/types.ts",
+      "packages/protocol/src/groups/session.ts",
+      "packages/protocol/src/groups/permission.ts",
+      "packages/protocol/src/groups/question.ts",
+      "packages/schema/src/session-event.ts",
+      "packages/schema/src/session.ts",
+      "packages/schema/src/permission.ts",
+      "packages/schema/src/question.ts",
+      "packages/schema/src/location.ts",
+      "packages/opencode/src/server/auth.ts",
+      "packages/opencode/src/server/routes/instance/httpapi/middleware/workspace-routing.ts",
+      "packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts",
+      "packages/opencode/src/server/routes/instance/httpapi/handlers/instance.ts"
+    ],
+    "sdk": {
+      "package": "@opencode-ai/client",
+      "generated_client": "packages/client/src/generated/client.ts",
+      "generated_types": "packages/client/src/generated/types.ts",
+      "runtime_dependency": false
+    }
+  },
+  "transport": {
+    "base_url": "http://127.0.0.1:<managed-port>",
+    "auth": {
+      "scheme": "Basic",
+      "username": "opencode",
+      "password_source": "one-time managed launch descriptor",
+      "header": "Authorization",
+      "required": true
+    },
+    "directory_binding": {
+      "header": "x-opencode-directory",
+      "canonical": true,
+      "required_for": "all instance-scoped endpoints",
+      "query_fallback": "directory"
+    },
+    "content_type": "application/json",
+    "sse_content_type": "text/event-stream"
+  },
+  "directory_probe": {
+    "id": "instance.path",
+    "method": "GET",
+    "path": "/path",
+    "auth_required": true,
+    "directory_bound": true,
+    "response_directory_field": "directory",
+    "non_git_worktree_may_be_root": true
+  },
+  "endpoints": [
+    {
+      "id": "v2.session.list",
+      "sdk": "sessions.list",
+      "method": "GET",
+      "path": "/api/session",
+      "query": { "directory": "absolute canonical path", "limit": "positive integer", "order": "asc|desc", "cursor": "opaque" },
+      "response": { "status": 200, "json": { "data": "Session.Info[]", "cursor": { "previous": "optional", "next": "optional" } } }
+    },
+    {
+      "id": "v2.session.create",
+      "sdk": "sessions.create",
+      "method": "POST",
+      "path": "/api/session",
+      "body": { "id": "optional ses_*", "agent": "optional", "model": "optional provider/model", "location": "optional Location.Ref" },
+      "response": { "status": 200, "json": { "data": "Session.Info" } }
+    },
+    {
+      "id": "v2.session.prompt",
+      "sdk": "sessions.prompt",
+      "method": "POST",
+      "path": "/api/session/{sessionID}/prompt",
+      "body": { "id": "optional msg_*", "prompt": { "text": "string", "files": "optional FileAttachment[]", "agents": "optional AgentAttachment[]" }, "delivery": "optional", "resume": "optional boolean" },
+      "response": { "status": 200, "json": { "data": "SessionInput.Admitted" } }
+    },
+    {
+      "id": "v2.session.history",
+      "sdk": "sessions.history",
+      "method": "GET",
+      "path": "/api/session/{sessionID}/history",
+      "query": { "limit": "optional 1..100", "after": "optional non-negative durable sequence" },
+      "response": { "status": 200, "json": { "data": "SessionEvent.Durable[]", "hasMore": "boolean" } }
+    },
+    {
+      "id": "v2.session.events",
+      "sdk": "sessions.events",
+      "method": "GET",
+      "path": "/api/session/{sessionID}/event",
+      "query": { "after": "optional exclusive non-negative durable sequence" },
+      "response": { "status": 200, "sse": "SessionEvent.Durable" }
+    },
+    {
+      "id": "v2.session.interrupt",
+      "sdk": "sessions.interrupt",
+      "method": "POST",
+      "path": "/api/session/{sessionID}/interrupt",
+      "response": { "status": 204, "body": "empty" }
+    },
+    {
+      "id": "v2.session.permission.list",
+      "sdk": "permissions.list",
+      "method": "GET",
+      "path": "/api/session/{sessionID}/permission",
+      "response": { "status": 200, "json": { "data": "Permission.Request[]" } }
+    },
+    {
+      "id": "v2.session.permission.reply",
+      "sdk": "permissions.reply",
+      "method": "POST",
+      "path": "/api/session/{sessionID}/permission/{requestID}/reply",
+      "body": { "reply": ["once", "always", "reject"], "message": "optional string" },
+      "response": { "status": 204, "body": "empty" }
+    },
+    {
+      "id": "v2.session.question.list",
+      "sdk": "questions.list",
+      "method": "GET",
+      "path": "/api/session/{sessionID}/question",
+      "response": { "status": 200, "json": { "data": "Question.Request[]" } }
+    },
+    {
+      "id": "v2.session.question.reply",
+      "sdk": "questions.reply",
+      "method": "POST",
+      "path": "/api/session/{sessionID}/question/{requestID}/reply",
+      "body": { "answers": "Question.Answer[]; one array per question, in order" },
+      "response": { "status": 204, "body": "empty" }
+    },
+    {
+      "id": "v2.session.question.reject",
+      "sdk": "questions.reject",
+      "method": "POST",
+      "path": "/api/session/{sessionID}/question/{requestID}/reject",
+      "response": { "status": 204, "body": "empty" }
+    }
+  ],
+  "events": {
+    "stream_endpoint": "v2.session.events",
+    "frame": { "id": "evt_*", "event": "optional", "data": "JSON", "retry": "optional milliseconds" },
+    "durable": { "aggregate": "sessionID", "sequence_field": "durable.seq", "version": 1 },
+    "resume": { "query": "after", "exclusive": true, "persist_after_apply": true, "duplicate_policy": "drop already applied id", "gap_policy": "reload session.history then reopen" },
+    "representative_types": [
+      "session.next.prompt.admitted",
+      "session.next.text.started",
+      "session.next.text.ended",
+      "session.next.tool.called",
+      "session.next.tool.success",
+      "session.next.step.ended",
+      "permission.v2.asked",
+      "permission.v2.replied",
+      "question.v2.asked",
+      "question.v2.replied",
+      "question.v2.rejected"
+    ]
+  },
+  "managed_health": {
+    "id": "global.godot.health",
+    "method": "GET",
+    "path": "/global/godot-health",
+    "auth_required": true,
+    "response": {
+      "status": 200,
+      "schema": "opencode-godot-listen",
+      "schema_version": 1,
+      "fields": ["schema", "schema_version", "hostname", "port", "pid", "process_start", "project_hash", "launch_nonce", "opencode_version", "build_fingerprint"],
+      "hostname": "127.0.0.1",
+      "port": "1..65535"
+    },
+    "not_found_status": 404,
+    "standard_health_unchanged": { "path": "/global/health", "json": { "healthy": true, "version": "string" } }
+  }
+}

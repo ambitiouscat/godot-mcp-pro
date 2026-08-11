@@ -1,0 +1,19 @@
+{
+  "fixture": "durable-replay-duplicate-gap",
+  "endpoint": "v2.session.events",
+  "initial_cursor": 2,
+  "initial_events": [
+    { "id": "evt_0002", "durable": { "aggregateID": "ses_demo", "seq": 2, "version": 1 }, "type": "session.next.text.ended" }
+  ],
+  "reconnect": {
+    "after": 2,
+    "events": [
+      { "id": "evt_0002", "durable": { "aggregateID": "ses_demo", "seq": 2, "version": 1 }, "type": "session.next.text.ended" },
+      { "id": "evt_0004", "durable": { "aggregateID": "ses_demo", "seq": 4, "version": 1 }, "type": "session.next.tool.success" }
+    ],
+    "duplicate_ids_dropped": ["evt_0002"],
+    "gap_detected": { "expected_seq": 3, "received_seq": 4 },
+    "recovery": { "request": "v2.session.history", "query": { "after": 2 }, "then_reopen": { "endpoint": "v2.session.events", "after": 4 } }
+  },
+  "apply_order": ["evt_0002", "history:seq3", "evt_0004"]
+}
