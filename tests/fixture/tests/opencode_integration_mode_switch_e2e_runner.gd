@@ -41,6 +41,10 @@ var command_completed := false
 var command_result: Dictionary = {}
 var native_tool_completed := false
 var mcp_tool_completed := false
+var mcp_trigger_started_at_ms := 0
+var mcp_trigger_last_capture_ms := 0
+var mcp_trigger_last_signature := ""
+var mcp_trigger_observations: Array[Dictionary] = []
 
 
 func _initialize() -> void:
@@ -174,7 +178,18 @@ func _switch_native_to_mcp() -> void:
 	if lifecycle.state != "ready":
 		return
 	_expect(lifecycle.get_integration_mode() == "mcp", "second generation is MCP")
+	mcp_ownership_path = _ownership_path()
+	mcp_trigger_started_at_ms = Time.get_ticks_msec()
+	mcp_trigger_last_capture_ms = 0
+	mcp_trigger_last_signature = ""
+	mcp_trigger_observations.clear()
+	_capture_mcp_trigger_observation(true)
 	var mcp_trigger := await _http_json(HTTPClient.METHOD_GET, "/mcp")
+	_capture_mcp_trigger_observation(true)
+	print("OPENCODE_GODOT_MODE_SWITCH_MCP_TRIGGER_OBSERVATIONS %s" % JSON.stringify(mcp_trigger_observations))
+	var daemon_output_tail := _redact_diagnostic_text(str(lifecycle._output_buffer)).right(2048)
+	if not daemon_output_tail.is_empty():
+		print("OPENCODE_GODOT_MODE_SWITCH_DAEMON_OUTPUT_TAIL %s" % JSON.stringify(daemon_output_tail))
 	_expect(mcp_trigger.get("ok", false), "authenticated MCP status request triggers the lazy child: %s" % mcp_trigger.get("error", ""))
 	if not mcp_trigger.get("ok", false):
 		return
@@ -187,7 +202,6 @@ func _switch_native_to_mcp() -> void:
 	_expect(trigger_status.get("status") != "disabled", "MCP child is enabled in the second generation")
 	if not failures.is_empty():
 		return
-	mcp_ownership_path = _ownership_path()
 	var ownership: Variant = await _wait_for_mcp_ownership()
 	_expect(ownership is Dictionary, "MCP generation publishes a complete nonce-bound ownership record before mcp_ready")
 	if not ownership is Dictionary:
@@ -431,13 +445,77 @@ func _mcp_status_entry(response: Dictionary) -> Dictionary:
 func _redacted_status_diagnostic(status: Dictionary) -> Dictionary:
 	var diagnostic := {"status": str(status.get("status", "missing"))}
 	if status.has("error"):
-		var message := str(status.get("error", ""))
-		for secret_value in [lifecycle.password, lifecycle.launch_nonce, bridge.owner_nonce]:
-			var secret := str(secret_value)
-			if not secret.is_empty():
-				message = message.replace(secret, "[REDACTED]")
-		diagnostic["error"] = message.right(1024)
+		diagnostic["error"] = _redact_diagnostic_text(str(status.get("error", ""))).right(1024)
 	return diagnostic
+
+
+func _redact_diagnostic_text(text: String) -> String:
+	var redacted := text
+	for secret_value in [lifecycle.password, lifecycle.launch_nonce, bridge.owner_nonce]:
+		var secret := str(secret_value)
+		if not secret.is_empty():
+			redacted = redacted.replace(secret, "[REDACTED]")
+	return redacted
+
+
+func _capture_mcp_trigger_observation(force: bool = false) -> void:
+	var now := Time.get_ticks_msec()
+	if not force and now - mcp_trigger_last_capture_ms < 250:
+		return
+	mcp_trigger_last_capture_ms = now
+	var observation := {
+		"elapsed_ms": maxi(0, now - mcp_trigger_started_at_ms),
+		"lifecycle_state": str(lifecycle.state),
+		"lifecycle_detail": _redact_diagnostic_text(str(lifecycle.detail)).right(512),
+		"daemon_pid": int(lifecycle.daemon_pid),
+		"bridge_state": str(websocket_server.get_state_name()),
+		"bridge_detail": _redact_diagnostic_text(str(websocket_server.get_state_detail())).right(512),
+		"ownership_exists": FileAccess.file_exists(mcp_ownership_path),
+		"discovery_exists": FileAccess.file_exists(bridge.discovery_path),
+	}
+	var ownership: Variant = _read_json(mcp_ownership_path)
+	if ownership is Dictionary:
+		var record: Dictionary = ownership
+		var sidecar: Dictionary = record.get("sidecar", {})
+		var parent: Dictionary = record.get("opencode_parent", {})
+		var executable: Dictionary = record.get("executable", {})
+		observation["ownership"] = {
+			"schema": str(record.get("schema", "")),
+			"schema_version": int(record.get("schema_version", 0)),
+			"project_matches": record.get("canonical_project") == bridge.project_path,
+			"launch_nonce_matches": record.get("launch_nonce") == lifecycle.launch_nonce,
+			"bridge_owner_nonce_matches": record.get("bridge_owner_nonce") == bridge.owner_nonce,
+			"sidecar_pid": int(sidecar.get("pid", 0)),
+			"sidecar_started_at_ms": int(sidecar.get("started_at_ms", 0)),
+			"parent_pid": int(parent.get("pid", 0)),
+			"parent_started_at_ms": int(parent.get("started_at_ms", 0)),
+			"parent_pid_matches_daemon": int(parent.get("pid", 0)) == int(lifecycle.daemon_pid),
+			"executable_matches_payload": _same_path(str(executable.get("path", "")), str(lifecycle._payload.get("mcp_path", ""))),
+		}
+	var discovery: Variant = _read_json(bridge.discovery_path)
+	if discovery is Dictionary:
+		var record: Dictionary = discovery
+		observation["discovery"] = {
+			"schema": str(record.get("schema", "")),
+			"protocol_version": int(record.get("protocol_version", 0)),
+			"project_matches": record.get("project_path") == bridge.project_path,
+			"owner_nonce_matches": record.get("owner_nonce") == bridge.owner_nonce,
+			"owner_pid": int(record.get("owner_pid", 0)),
+			"owner_started_at_ms": int(record.get("owner_started_at_ms", 0)),
+			"parent_pid": int(record.get("parent_pid", 0)),
+			"parent_started_at_ms": int(record.get("parent_started_at_ms", 0)),
+			"endpoint": str(record.get("endpoint", "")),
+		}
+	var signature_data := observation.duplicate(true)
+	signature_data.erase("elapsed_ms")
+	var signature := JSON.stringify(signature_data)
+	if signature == mcp_trigger_last_signature and not mcp_trigger_observations.is_empty():
+		mcp_trigger_observations[-1]["last_elapsed_ms"] = observation["elapsed_ms"]
+		return
+	mcp_trigger_last_signature = signature
+	mcp_trigger_observations.append(observation)
+	if mcp_trigger_observations.size() > 16:
+		mcp_trigger_observations.pop_front()
 
 
 func _wait_process_stale(pid: int, started_at_ms: int, message: String) -> void:
@@ -468,6 +546,8 @@ func _http_json(method: HTTPClient.Method, request_path: String, payload: Varian
 	while Time.get_ticks_msec() < _deadline(REQUEST_TIMEOUT_MS):
 		lifecycle.update()
 		_tick_bridge_client()
+		if request_path == "/mcp":
+			_capture_mcp_trigger_observation()
 		if client.poll() != OK:
 			client.close()
 			return {"ok": false, "error": "HTTP poll failed"}
